@@ -1,0 +1,21 @@
+---
+title: "polarisation"
+output: html_document
+---
+
+#Retrieve SNP coordinates from all VCF files:
+```{R, engine='bash'}
+
+cd /share/rdata/ramon.pouso/polarisation/
+rm all_VCF_list.txt
+find /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants -name '*bial*vcf' -print | grep -v 'masked' > all_VCF_list.txt
+find /share/rdata/ramon.pouso/POOLS -name '*masked.recode_snps.vcf' -print >> all_VCF_list.txt
+
+rm all_VCF_entries.bed
+while read -r FILE; do
+  echo $FILE
+  grep -v '#' $FILE | awk -F"\t" '{print $1,$2-1,$2}' OFS="\t" >> all_VCF_entries_raw.bed
+done < all_VCF_list.txt
+LANG=en_EN sort -k1,1 -k2,2n all_VCF_entries_raw.bed | uniq > all_VCF_entries_curated.bed
+  
+```
