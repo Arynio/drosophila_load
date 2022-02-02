@@ -3,7 +3,233 @@ title: "polarisation"
 output: html_document
 ---
 
-#Retrieve SNP coordinates from all VCF files:
+#Prepare outgroup BAM files:
+##Extract only orthologous regions.
+```{R, engine='bash'}
+
+#Most of this pipeline was designed by Ramón & Humberto (see Ramón's pipeline). This step allows us to intersect the BAM (after the isolation step) with the orthologous regions.
+
+```
+
+##Option A (bedtools): intersect_orthologs.sh
+```{R, engine='bash'}
+
+module load gcc/7.2.0 
+module add gcc/7.2.0
+bedtools intersect -abam $1 -b /share/rdata/ramon.pouso/outgroups/orthologs/dmel_dsim_dyak_orthologs.db_coord_sorted.bed > $2
+# $1 is the input bam, $2 is the filtered bam
+
+```
+
+##Option B (samtools): orthologs_subset_bam.sh
+```{R, engine='bash'}
+
+module load samtools/1.4.1
+cat /share/rdata/ramon.pouso/outgroups/orthologs/dmel_dsim_dyak_orthologs.db_coord_sorted.txt | xargs samtools view -b $1 > $2
+# $1 is the input bam and $2 the filtered output bam.
+
+
+#The output bam is recognised as truncated by samtools.
+
+```
+
+
+#Prepare outgroup genome fasta:
+##Option A: pick random base among all reads.
+###haploidise_genome_randombase.sh
+```{R, engine='bash'}
+
+module load samtools/1.4.1
+rm $3
+SCAFFOLDS="/share/rdata/ramon.pouso/reference/indexed_reference/dmel-all-chromosome-r6.14.length.txt"
+while read SCAFFOLD END_ZERO;
+do
+echo "working with scaffold $SCAFFOLD"
+END=$(expr $END_ZERO + 1)
+samtools mpileup -s -q20 -f $1 $2 -r $SCAFFOLD | /share/rdata/ramon.pouso/outgroups/Scripts/Chrom-Compare-master/pu2fa -c $SCAFFOLD -s 1 -e $END -C 150 >> $3
+done < $SCAFFOLDS
+# $1 is the uncompressed reference genome fasta. $2 is the input bam. $3 is the output fasta.
+
+```
+
+###Comments:
+```{R, engine='bash'}
+
+#OLD. Ignore.
+
+#I applied the genome_haploidisation.sh script which uses samtools mpileup (with -q30) and pu2fa to obtain the fasta of the outgroup with the structure of the reference genome. Code:
+
+cd /share/rdata/ramon.pouso/outgroups/simulans/3processed
+
+qsub -cwd -l h=compute-0-9 /share/rdata/ramon.pouso/outgroups/Scripts/haploidise_genome.sh /share/rdata/ramon.pouso/reference/indexed_reference/dmel-all-chromosome-r6.14.fasta /share/rdata/ramon.pouso/outgroups/simulans/3processed/stampy_simulans_iso_rmdup_mq20_rg_realigned.bam /share/rdata/ramon.pouso/outgroups/simulans/3processed/stampy_simulans_iso_rmdup_mq20_rg_realigned.fasta
+
+#The resulting fasta has a total of 143,726,002 bases, of which 32,004,815 are N (22%). Then I repeated it with -q20 to allow for a larger number of identified positions, but the number is actually lower.
+  
+```
+
+###Quality checks:
+```{R, engine='bash'}
+
+#Test similarity between outgroup states for target positions (SNPs in the gen0-40 VCF):
+##First, retrieve target positions for simulans:
+cd /share/rdata/ramon.pouso/outgroups/simulans/3processed
+bedtools getfasta -fi bwa_simulans_iso_rmdup_mq30_rg_multirealigned.fasta -bed /share/rdata/ramon.pouso/polarisation/gen0-40_VCF_entries_curated.bed | grep -v '>' > test_simulans
+##Then retrieve target positions for yakuba:
+cd /share/rdata/ramon.pouso/outgroups/yakuba/3processed
+bedtools getfasta -fi bwa_yakuba_iso_rmdup_mq30_rg_multirealigned.fasta -bed /share/rdata/ramon.pouso/polarisation/gen0-40_VCF_entries_curated.bed | grep -v '>' > test_yakuba
+##Count how many positions are exactly the same:
+cd /share/rdata/ramon.pouso/outgroups/simulans/3processed
+../../yakuba/3processed/test_yakuba | grep -v 'N' | awk '$1==$2' | wc -l #909179
+##And how many are different:
+cd /share/rdata/ramon.pouso/outgroups/simulans/3processed
+paste test_simulans ../../yakuba/3processed/test_yakuba | grep -v 'N' | awk '$1!=$2' | wc -l #153382
+##Most are the same, which makes sense if everything is working fine.
+
+#Check proportion of Ns in the genome.
+##First count the total number of bases in the genome:
+grep -v '>' bwa_simulans_iso_rmdup_mq30_rg_multirealigned.fasta | fold -w1 | wc -l #143726002 (I checked that it's the same for yakuba).
+##Then count the number of Ns in simulans:
+grep -v '>' bwa_simulans_iso_rmdup_mq30_rg_multirealigned.fasta | fold -w1 | grep 'N' | wc -l #35733924 (24.86%)
+##Then count the number of Ns in yakuba:
+grep -v '>' bwa_yakuba_iso_rmdup_mq30_rg_multirealigned.fasta | fold -w1 | grep 'N' | wc -l #55163389 (38.38%)
+
+#Next, check proportion of Ns in orthologs.
+##First count the total number of bases in orthologs:
+bedtools getfasta -fi bwa_simulans_iso_rmdup_mq30_rg_multirealigned.fasta -bed /share/rdata/ramon.pouso/outgroups/orthologs/dmel_dsim_dyak_orthologs.db_coord_sorted.bed | grep -v '>' | fold -w1 | wc -l #90581488 (I checked that it's the same for yakuba).
+##Then count the number of Ns in simulans:
+bedtools getfasta -fi bwa_simulans_iso_rmdup_mq30_rg_multirealigned.fasta -bed /share/rdata/ramon.pouso/outgroups/orthologs/dmel_dsim_dyak_orthologs.db_coord_sorted.bed | grep -v '>' | fold -w1 | grep 'N' | wc -l #11089997 (12.24%)
+##Then count the number of Ns in yakuba:
+bedtools getfasta -fi bwa_yakuba_iso_rmdup_mq30_rg_multirealigned.fasta -bed /share/rdata/ramon.pouso/outgroups/orthologs/dmel_dsim_dyak_orthologs.db_coord_sorted.bed | grep -v '>' | fold -w1 | grep 'N' | wc -l #23622966 (26.08%)
+
+```
+
+##Option B: pick major (i.e. consensus) base among all reads.
+###haploidise_genome_majorbase.sh
+```{R, engine='bash'}
+
+module load samtools/1.4.1
+rm $3
+SCAFFOLDS="/share/rdata/ramon.pouso/reference/indexed_reference/dmel-all-chromosome-r6.14.length.txt"
+while read SCAFFOLD END_ZERO;
+do
+echo "working with scaffold $SCAFFOLD"
+END=$(expr $END_ZERO + 1)
+samtools mpileup -s -q20 -f $1 $2 -r $SCAFFOLD | /share/rdata/ramon.pouso/outgroups/Scripts/Chrom-Compare-master/pu2fa -C 200 -m 20 -c $SCAFFOLD -s 1 -e $END -b 1 >> $3
+done < $SCAFFOLDS
+# $1 is the uncompressed reference genome fasta. $2 is the input bam. $3 is the output fasta.
+
+```
+
+###Comments:
+```{R, engine='bash'}
+
+#I applied the genome_haploidisation_consensusbase.sh script which uses samtools mpileup (with -q20 but we actually applied a q30 filter before) and pu2fa -b to obtain the fasta of the outgroup (consensus bases) with the structure of the reference genome. Code:
+
+#For simulans:
+cd /share/rdata/ramon.pouso/outgroups/simulans/2steps
+qsub -cwd -l h=compute-0-9 /share/rdata/ramon.pouso/outgroups/Scripts/haploidise_genome_consensusbase.sh /share/rdata/ramon.pouso/reference/indexed_reference/dmel-all-chromosome-r6.14.fasta bwa_simulans_iso_rmdup_mq30_rg_multirealigned.bam /share/rdata/ramon.pouso/outgroups/simulans/3processed/bwa_simulans_iso_rmdup_mq30_rg_multirealigned_consensus.fasta
+
+#For yakuba:
+cd /share/rdata/ramon.pouso/outgroups/yakuba/2steps
+qsub -cwd -l h=compute-0-9 /share/rdata/ramon.pouso/outgroups/Scripts/haploidise_genome_consensusbase.sh /share/rdata/ramon.pouso/reference/indexed_reference/dmel-all-chromosome-r6.14.fasta bwa_yakuba_iso_rmdup_mq30_rg_multirealigned.bam /share/rdata/ramon.pouso/outgroups/yakuba/3processed/bwa_yakuba_iso_rmdup_mq30_rg_multirealigned_consensus.fasta
+  
+```
+
+###haploidise_genome_vcfutils.sh (alternative with bcftools):
+```{R, engine='bash'}
+
+#Note: this code doesn't work perfectly. The output fastas aren't squared. Those chromosomes excluded from the BAMs are not represented here, and even for those which are included, lengths are not exactly the same between simulans and yakuba. So don't use this.
+
+module load samtools/1.4.1
+module load bcftools/1.9
+rm $3
+SCAFFOLDS="/share/rdata/ramon.pouso/reference/indexed_reference/dmel-all-chromosome-r6.14.length.txt"
+while read SCAFFOLD END_ZERO;
+do
+echo "working with scaffold $SCAFFOLD"
+samtools mpileup -uf $1 $2 -r $SCAFFOLD | bcftools call -c | /share/rdata/ramon.pouso/outgroups/Scripts/vcfutils.pl vcf2fq >> $3
+done < $SCAFFOLDS
+/share/rdata/ramon.pouso/misc/seqtk/seqtk seq -aQ64 -q30 -n N $3 > $4
+# $1 is the uncompressed reference genome fasta. $2 is the input bam. $3 is the output fastq. $4 is the output fasta.
+
+```
+
+
+#Filter base population VCF files:
+##Autosomic:
+```{R, engine='bash'}
+
+#First we'll retrieve all sites with depth higher than the average + 3SD for each of the following pools: gen0, gen20, and gen30 of the base population. Then we'll retrieve sites with the flag EMfail. Finally we'll filter them out from the VCF.
+
+cd /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/
+rm CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.DP_EM_filter_raw.bed
+touch CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.DP_EM_filter_raw.bed
+##DP Gen 0:
+AVG=$(grep "mean coverageData" /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/qualitycontrol/LBT0_new_gen0_bwa_iso_rmdup_mq30_rg_multirealigned_autosomic_stats/genome_results.txt | awk -F"= |X" '{printf ("%s\n",$2)}')
+SD=$(grep "std coverageData" /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/qualitycontrol/LBT0_new_gen0_bwa_iso_rmdup_mq30_rg_multirealigned_autosomic_stats/genome_results.txt | awk -F"= |X" '{printf ("%s\n",$2)}')
+FILTER=$(echo $AVG + 3*$SD | bc)
+grep -v '#' CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.vcf | cut -f-2,12 | awk -v filter="$FILTER" -F"\t|:" '{if ($5 >= filter) printf ("%s\t%s\t%s\n", $1,$2-1,$2)}' >> CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.DP_EM_filter_raw.bed
+##DP Gen 20:
+AVG=$(grep "mean coverageData" /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/qualitycontrol/BT20_new_gen20_bwa_iso_rmdup_mq30_rg_multirealigned_autosomic_stats/genome_results.txt | awk -F"= |X" '{printf ("%s\n",$2)}')
+SD=$(grep "std coverageData" /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/qualitycontrol/BT20_new_gen20_bwa_iso_rmdup_mq30_rg_multirealigned_autosomic_stats/genome_results.txt | awk -F"= |X" '{printf ("%s\n",$2)}')
+FILTER=$(echo $AVG + 3*$SD | bc)
+grep -v '#' CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.vcf | cut -f-2,13 | awk -v filter="$FILTER" -F"\t|:" '{if ($5 >= filter) printf ("%s\t%s\t%s\n", $1,$2-1,$2)}' >> CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.DP_EM_filter_raw.bed
+##DP Gen 30:
+AVG=$(grep "mean coverageData" /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/qualitycontrol/BT30_new_gen30_bwa_iso_rmdup_mq30_rg_multirealigned_autosomic_stats/genome_results.txt | awk -F"= |X" '{printf ("%s\n",$2)}')
+SD=$(grep "std coverageData" /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/qualitycontrol/BT30_new_gen30_bwa_iso_rmdup_mq30_rg_multirealigned_autosomic_stats/genome_results.txt | awk -F"= |X" '{printf ("%s\n",$2)}')
+FILTER=$(echo $AVG + 3*$SD | bc)
+grep -v '#' CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.vcf | cut -f-2,14 | awk -v filter="$FILTER" -F"\t|:" '{if ($5 >= filter) printf ("%s\t%s\t%s\n", $1,$2-1,$2)}' >> CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.DP_EM_filter_raw.bed
+##EMfail:
+grep -v '#' CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.vcf | grep "EMfail" | awk -F"\t" '{printf ("%s\t%s\t%s\n", $1,$2-1,$2)}' >> CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.DP_EM_filter_raw.bed
+
+#Sort sites and remove duplicates:
+sort -k1,1 -k2,2n CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.DP_EM_filter_raw.bed | uniq > CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.DP_EM_filter_sorted.bed
+
+#Filter the VCF:
+module load gcc/7.2.0
+module add gcc/7.2.0
+bedtools subtract -a CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.vcf -b CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.DP_EM_filter_sorted.bed -header > CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.DP_EM_filtered.vcf
+
+```
+
+##Xchr:
+```{R, engine='bash'}
+
+#First we'll retrieve all sites with depth higher than the average + 3SD for each of the following pools: gen0, gen20, and gen30 of the base population. Then we'll retrieve sites with the flag EMfail. Finally we'll filter them out from the VCF.
+
+cd /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/
+rm CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.DP_EM_filter_raw.bed
+touch CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.DP_EM_filter_raw.bed
+##DP Gen 0:
+AVG=$(grep "mean coverageData" /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/qualitycontrol/LBT0_new_bwa_iso_rmdup_mq30_rg_multirealigned_x_stats/genome_results.txt | awk -F"= |X" '{printf ("%s\n",$2)}')
+SD=$(grep "std coverageData" /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/qualitycontrol/LBT0_new_bwa_iso_rmdup_mq30_rg_multirealigned_x_stats/genome_results.txt | awk -F"= |X" '{printf ("%s\n",$2)}')
+FILTER=$(echo $AVG + 3*$SD | bc)
+grep -v '#' CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.vcf | cut -f-2,12 | awk -v filter="$FILTER" -F"\t|:" '{if ($5 >= filter) printf ("%s\t%s\t%s\n", $1,$2-1,$2)}' >> CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.DP_EM_filter_raw.bed
+##DP Gen 20:
+AVG=$(grep "mean coverageData" /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/qualitycontrol/BT20_new_bwa_iso_rmdup_mq30_rg_multirealigned_x_stats/genome_results.txt | awk -F"= |X" '{printf ("%s\n",$2)}')
+SD=$(grep "std coverageData" /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/qualitycontrol/BT20_new_bwa_iso_rmdup_mq30_rg_multirealigned_x_stats/genome_results.txt | awk -F"= |X" '{printf ("%s\n",$2)}')
+FILTER=$(echo $AVG + 3*$SD | bc)
+grep -v '#' CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.vcf | cut -f-2,13 | awk -v filter="$FILTER" -F"\t|:" '{if ($5 >= filter) printf ("%s\t%s\t%s\n", $1,$2-1,$2)}' >> CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.DP_EM_filter_raw.bed
+##DP Gen 30:
+AVG=$(grep "mean coverageData" /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/qualitycontrol/BT30_new_bwa_iso_rmdup_mq30_rg_multirealigned_x_stats/genome_results.txt | awk -F"= |X" '{printf ("%s\n",$2)}')
+SD=$(grep "std coverageData" /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/qualitycontrol/BT30_new_bwa_iso_rmdup_mq30_rg_multirealigned_x_stats/genome_results.txt | awk -F"= |X" '{printf ("%s\n",$2)}')
+FILTER=$(echo $AVG + 3*$SD | bc)
+grep -v '#' CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.vcf | cut -f-2,14 | awk -v filter="$FILTER" -F"\t|:" '{if ($5 >= filter) printf ("%s\t%s\t%s\n", $1,$2-1,$2)}' >> CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.DP_EM_filter_raw.bed
+##EMfail:
+grep -v '#' CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.vcf | grep "EMfail" | awk -F"\t" '{printf ("%s\t%s\t%s\n", $1,$2-1,$2)}' >> CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.DP_EM_filter_raw.bed
+
+#Sort sites and remove duplicates:
+sort -k1,1 -k2,2n CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.DP_EM_filter_raw.bed | uniq > CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.DP_EM_filter_sorted.bed
+
+#Filter the VCF:
+module load gcc/7.2.0
+module add gcc/7.2.0
+bedtools subtract -a CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.vcf -b CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.DP_EM_filter_sorted.bed -header > CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.DP_EM_filtered.vcf
+
+```
+
+#Retrieve SNP coordinates of interest:
+##From all VCF files:
 ```{R, engine='bash'}
 
 cd /share/rdata/ramon.pouso/polarisation/
@@ -11,11 +237,435 @@ rm all_VCF_list.txt
 find /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants -name '*bial*vcf' -print | grep -v 'masked' > all_VCF_list.txt
 find /share/rdata/ramon.pouso/POOLS -name '*masked.recode_snps.vcf' -print >> all_VCF_list.txt
 
-rm all_VCF_entries.bed
+rm all_VCF_entries_raw.bed
 while read -r FILE; do
   echo $FILE
   grep -v '#' $FILE | awk -F"\t" '{print $1,$2-1,$2}' OFS="\t" >> all_VCF_entries_raw.bed
 done < all_VCF_list.txt
 LANG=en_EN sort -k1,1 -k2,2n all_VCF_entries_raw.bed | uniq > all_VCF_entries_curated.bed
   
+```
+
+##From gen0-40:
+```{R, engine='bash'}
+
+cd /share/rdata/ramon.pouso/polarisation/
+rm gen0-40_VCF_list.txt
+find /share/rdata/ramon.pouso/POOLS/gen0-40/ -name '*masked.recode_snps.vcf' -print > gen0-40_VCF_list.txt
+
+rm gen0-40_VCF_entries.bed
+while read -r FILE; do
+  echo $FILE
+  grep -v '#' $FILE | awk -F"\t" '{print $1,$2-1,$2}' OFS="\t" >> gen0-40_VCF_entries_raw.bed
+done < gen0-40_VCF_list.txt
+LANG=en_EN sort -k1,1 -k2,2n gen0-40_VCF_entries_raw.bed | uniq > gen0-40_VCF_entries_curated.bed
+
+```
+
+##From all VCF files except for the gen0-40 ones:
+```{R, engine='bash'}
+
+cd /share/rdata/ramon.pouso/polarisation/
+
+grep -v -f gen0-40_VCF_list.txt all_VCF_list.txt > except_gen0-40_VCF_list.txt
+
+rm except_gen0-40_VCF_entries.bed
+while read -r FILE; do
+  echo $FILE
+  grep -v '#' $FILE | awk -F"\t" '{print $1,$2-1,$2}' OFS="\t" >> except_gen0-40_VCF_entries_raw.bed
+done < except_gen0-40_VCF_list.txt
+LANG=en_EN sort -k1,1 -k2,2n except_gen0-40_VCF_entries_raw.bed | uniq > except_gen0-40_VCF_entries_curated.bed
+
+bedtools subtract -a except_gen0-40_VCF_entries_curated.bed -b gen0-40_VCF_entries_curated.bed > snpsnotin_gen0-40_VCF_entries_curated.bed
+
+```
+
+##Polymorphic sites from the base population, gens 0, 20 and 30:
+```{R, engine='bash'}
+
+cd /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/
+
+#Gen 0:
+rm /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/gen0_allele_counts.txt
+grep -v '#' CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.DP_EM_filtered.vcf | cut -f1-2,4-5,12 | awk -F"\t|:|," '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$8+$10+$12,$9+$11+$13)}' > /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/gen0_allele_counts.txt
+grep -v '#' CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.DP_EM_filtered.vcf | cut -f1-2,4-5,12 | awk -F"\t|:|," '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$8+$10+$12,$9+$11+$13)}' >> /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/gen0_allele_counts.txt
+#Gen 20:
+rm /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/gen20_allele_counts.txt
+grep -v '#' CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.DP_EM_filtered.vcf | cut -f1-2,4-5,13 | awk -F"\t|:|," '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$8,$9,$10,$11,$12,$13)}' > /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/gen20_allele_counts.txt
+grep -v '#' CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.DP_EM_filtered.vcf | cut -f1-2,4-5,13 | awk -F"\t|:|," '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$8+$10+$12,$9+$11+$13)}' >> /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/gen20_allele_counts.txt
+#Gen 30:
+rm /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/gen30_allele_counts.txt
+grep -v '#' CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.DP_EM_filtered.vcf | cut -f1-2,4-5,14 | awk -F"\t|:|," '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$8,$9,$10,$11,$12,$13)}' > /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/gen30_allele_counts.txt
+grep -v '#' CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.DP_EM_filtered.vcf | cut -f1-2,4-5,14 | awk -F"\t|:|," '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$8+$10+$12,$9+$11+$13)}' >> /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/gen30_allele_counts.txt
+
+#Combine counts:
+cd /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/
+module load gcc/7.2.0
+module add gcc/7.2.0
+bedtools intersect -a <(bedtools intersect -a gen0_allele_counts.txt -b gen20_allele_counts.txt -wa -wb) -b gen30_allele_counts.txt -wa -wb | awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$6+$13+$20,$7+$14+$21)}' > final_snp_set.sum_gen0_gen20_gen30_allele_counts.bed
+
+```
+
+#Extract the outgroup state:
+##extract_state.sh
+```{R, engine='bash'}
+
+module load gcc/7.2.0
+module add gcc/7.2.0
+bedtools getfasta -fi $1 -bed $2 -tab -fo $3
+
+awk -F"\t|:|-" '{printf ("%s\t%s\t%s\t%s\n", $1,$2,$3,$4)}' $3 > $4
+
+# $1 is the input fasta, $2 the bed with the coordinates of interest, $3 the output file in txt format, and $4 the output file transformed back to bed format.
+
+```
+
+##Execution:
+###For SNPs:
+```{R, engine='bash'}
+
+#Note: the BED file used here is obtained below, while building the est-sfs input.
+
+#For simulans:
+cd /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline
+
+/share/rdata/ramon.pouso/outgroups/Scripts/extract_state.sh /share/rdata/ramon.pouso/outgroups/simulans/3processed/bwa_simulans_iso_rmdup_mq30_rg_multirealigned_major.fasta final_snp_set.sum_gen0_gen20_gen30_allele_counts.bed ./final_snp_set.simulans_state.txt ./final_snp_set.simulans_state.bed
+
+#For yakuba:
+cd /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline
+
+/share/rdata/ramon.pouso/outgroups/Scripts/extract_state.sh /share/rdata/ramon.pouso/outgroups/yakuba/3processed/bwa_yakuba_iso_rmdup_mq30_rg_multirealigned_major.fasta final_snp_set.sum_gen0_gen20_gen30_allele_counts.bed ./final_snp_set.yakuba_state.txt ./final_snp_set.yakuba_state.bed
+
+```
+
+###For monomorphic positions (whole-genome):
+```{R, engine='bash'}
+
+cd /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline
+module load gcc/7.2.0
+module add gcc/7.2.0
+
+#First generate a bed file for those positions that are excluded from the final dataset (i.e. monomorphic positions).
+bedtools subtract -a /share/rdata/ramon.pouso/reference/indexed_reference/dmel-all-chromosome-r6.14.bed -b /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/final_snp_set.sum_gen0_gen20_gen30_allele_counts.bed > final_snp_set.rest_of_genome.bed
+
+#For melanogaster:
+bedtools getfasta -fi /share/rdata/ramon.pouso/reference/indexed_reference/dmel-all-chromosome-r6.14.fasta -bed final_snp_set.rest_of_genome.bed -tab | cut -f2 | fold -w1 > final_snp_set.rest_of_genome.melanogaster_state.txt
+
+#For simulans:
+bedtools getfasta -fi /share/rdata/ramon.pouso/outgroups/simulans/3processed/bwa_simulans_iso_rmdup_mq30_rg_multirealigned_major.fasta -bed final_snp_set.rest_of_genome.bed -tab | cut -f2 | fold -w1 > final_snp_set.rest_of_genome.simulans_state.txt
+
+#For yakuba:
+bedtools getfasta -fi /share/rdata/ramon.pouso/outgroups/yakuba/3processed/bwa_yakuba_iso_rmdup_mq30_rg_multirealigned_major.fasta -bed final_snp_set.rest_of_genome.bed -tab | cut -f2 | fold -w1 > final_snp_set.rest_of_genome.yakuba_state.txt
+
+```
+
+###For monomorphic positions (orthologs):
+```{R, engine='bash'}
+
+cd /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/orthologs
+module load gcc/7.2.0
+module add gcc/7.2.0
+
+#First generate a bed file for those positions that are excluded from the final dataset (i.e. monomorphic positions).
+bedtools subtract -a /share/rdata/ramon.pouso/outgroups/orthologs/dmel_dsim_dyak_orthologs.db_coord_sorted.bed -b /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/final_snp_set.sum_gen0_gen20_gen30_allele_counts.bed > final_snp_set.orthologs.rest_of_genome.bed
+
+#For melanogaster:
+bedtools getfasta -fi /share/rdata/ramon.pouso/reference/indexed_reference/dmel-all-chromosome-r6.14.fasta -bed final_snp_set.orthologs.rest_of_genome.bed -tab | cut -f2 | fold -w1 > final_snp_set.rest_of_genome.melanogaster_state.txt
+
+#For simulans:
+bedtools getfasta -fi /share/rdata/ramon.pouso/outgroups/simulans/3processed/bwa_simulans_iso_rmdup_mq30_rg_multirealigned_major.fasta -bed final_snp_set.orthologs.rest_of_genome.bed -tab | cut -f2 | fold -w1 > final_snp_set.orthologs.rest_of_genome.simulans_state.txt
+
+#For yakuba:
+bedtools getfasta -fi /share/rdata/ramon.pouso/outgroups/yakuba/3processed/bwa_yakuba_iso_rmdup_mq30_rg_multirealigned_major.fasta -bed final_snp_set.orthologs.rest_of_genome.bed -tab | cut -f2 | fold -w1 > final_snp_set.orthologs.rest_of_genome.yakuba_state.txt
+
+```
+
+#Build the est-sfs input:
+##Whole-genome:
+###Format SNPs:
+####Format data from the focal species:
+```{bash}
+
+cd /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline
+#First extrapolate counts to a total number of copies of 100 per site, so that est-sfs can run (all sites are required to have the same number of copies, and such number cannot be above 199). Error sites where the count is 0 for both REF and ALT alleles will be reinterpreted as monomorphic for the reference.
+awk -F"\t" '{if ($6!=0 || $7!=0) printf ("%s\t%s\t%s\t%s\t%s\t%.0f\t%.0f\n", $1,$2,$3,$4,$5,100*$6/($6+$7),100*$7/($6+$7)); else printf ("%s\t%s\t%s\t%s\t%s\t%.0f\t%.0f\n", $1,$2,$3,$4,$5,100,0)}' final_snp_set.sum_gen0_gen20_gen30_allele_counts.bed > final_snp_set.sum_gen0_gen20_gen30_allele_counts.extrapolated_to_100.bed
+
+#Then format counts:
+awk '{                                       
+if ($4=="A" && $5=="C") printf ("%s\t%s\t%s\t%s,%s,%s,%s\n", $1,$2,$3,$6,$7,0,0);
+else if ($4=="A" && $5=="G") printf ("%s\t%s\t%s\t%s,%s,%s,%s\n", $1,$2,$3,$6,0,$7,0);
+else if ($4=="A" && $5=="T") printf ("%s\t%s\t%s\t%s,%s,%s,%s\n", $1,$2,$3,$6,0,0,$7);
+else if ($4=="C" && $5=="A") printf ("%s\t%s\t%s\t%s,%s,%s,%s\n", $1,$2,$3,$7,$6,0,0);
+else if ($4=="C" && $5=="G") printf ("%s\t%s\t%s\t%s,%s,%s,%s\n", $1,$2,$3,0,$6,$7,0);
+else if ($4=="C" && $5=="T") printf ("%s\t%s\t%s\t%s,%s,%s,%s\n", $1,$2,$3,0,$6,0,$7);
+else if ($4=="G" && $5=="A") printf ("%s\t%s\t%s\t%s,%s,%s,%s\n", $1,$2,$3,$7,0,$6,0);
+else if ($4=="G" && $5=="C") printf ("%s\t%s\t%s\t%s,%s,%s,%s\n", $1,$2,$3,0,$7,$6,0);
+else if ($4=="G" && $5=="T") printf ("%s\t%s\t%s\t%s,%s,%s,%s\n", $1,$2,$3,0,0,$6,$7);
+else if ($4=="T" && $5=="A") printf ("%s\t%s\t%s\t%s,%s,%s,%s\n", $1,$2,$3,$7,0,0,$6);
+else if ($4=="T" && $5=="C") printf ("%s\t%s\t%s\t%s,%s,%s,%s\n", $1,$2,$3,0,$7,0,$6);
+else if ($4=="T" && $5=="G") printf ("%s\t%s\t%s\t%s,%s,%s,%s\n", $1,$2,$3,0,0,$7,$6);
+else printf ("%s\t%s\t%s\t%s,%s,%s,%s\n", $1,$2,$3,0,0,0,0);
+}' final_snp_set.sum_gen0_gen20_gen30_allele_counts.extrapolated_to_100.bed > final_snp_set.sum_gen0_gen20_gen30_allele_counts.extrapolated_to_100.focalsp_counts.bed
+
+```
+
+####Format data from the outgroup species:
+```{bash}
+
+cd /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline
+#Next, format the outgroup species data:
+##Simulans:
+awk '{if ($4=="A") printf ("%s\t%s\t%s\t%s,%s,%s,%s\n", $1,$2,$3,1,0,0,0);
+else if ($4=="C") printf ("%s\t%s\t%s\t%s,%s,%s,%s\n", $1,$2,$3,0,1,0,0);
+else if ($4=="G") printf ("%s\t%s\t%s\t%s,%s,%s,%s\n", $1,$2,$3,0,0,1,0);
+else if ($4=="T") printf ("%s\t%s\t%s\t%s,%s,%s,%s\n", $1,$2,$3,0,0,0,1);
+else printf ("%s\t%s\t%s\t%s,%s,%s,%s\n", $1,$2,$3,0,0,0,0);
+}' final_snp_set.simulans_state.bed > final_snp_set.simulans_state.simulans_counts.bed
+
+##Yakuba:
+awk '{if ($4=="A") printf ("%s\t%s\t%s\t%s,%s,%s,%s\n", $1,$2,$3,1,0,0,0);
+else if ($4=="C") printf ("%s\t%s\t%s\t%s,%s,%s,%s\n", $1,$2,$3,0,1,0,0);
+else if ($4=="G") printf ("%s\t%s\t%s\t%s,%s,%s,%s\n", $1,$2,$3,0,0,1,0);
+else if ($4=="T") printf ("%s\t%s\t%s\t%s,%s,%s,%s\n", $1,$2,$3,0,0,0,1);
+else printf ("%s\t%s\t%s\t%s,%s,%s,%s\n", $1,$2,$3,0,0,0,0);
+}' final_snp_set.yakuba_state.bed > final_snp_set.yakuba_state.yakuba_counts.bed
+
+```
+
+###Format rest of the genome (monomorphic positions):
+####Format data from all species:
+```{bash}
+
+cd /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline
+
+##Melanogaster:
+awk '{if ($1=="A") printf ("%s,%s,%s,%s\n", 100,0,0,0);
+else if ($1=="C") printf ("%s,%s,%s,%s\n", 0,100,0,0);
+else if ($1=="G") printf ("%s,%s,%s,%s\n", 0,0,100,0);
+else if ($1=="T") printf ("%s,%s,%s,%s\n", 0,0,0,100);
+else printf ("%s,%s,%s,%s\n", 0,0,0,0);
+}' final_snp_set.rest_of_genome.melanogaster_state.txt > final_snp_set.rest_of_genome.melanogaster_state.melanogaster_counts.txt
+
+##Simulans:
+awk '{if ($1=="A") printf ("%s,%s,%s,%s\n", 1,0,0,0);
+else if ($1=="C") printf ("%s,%s,%s,%s\n", 0,1,0,0);
+else if ($1=="G") printf ("%s,%s,%s,%s\n", 0,0,1,0);
+else if ($1=="T") printf ("%s,%s,%s,%s\n", 0,0,0,1);
+else printf ("%s,%s,%s,%s\n", 0,0,0,0);
+}' final_snp_set.rest_of_genome.simulans_state.txt > final_snp_set.rest_of_genome.simulans_state.simulans_counts.txt
+
+##Yakuba:
+awk '{if ($1=="A") printf ("%s,%s,%s,%s\n", 1,0,0,0);
+else if ($1=="C") printf ("%s,%s,%s,%s\n", 0,1,0,0);
+else if ($1=="G") printf ("%s,%s,%s,%s\n", 0,0,1,0);
+else if ($1=="T") printf ("%s,%s,%s,%s\n", 0,0,0,1);
+else printf ("%s,%s,%s,%s\n", 0,0,0,0);
+}' final_snp_set.rest_of_genome.yakuba_state.txt > final_snp_set.rest_of_genome.yakuba_state.yakuba_counts.txt
+
+##Combine them:
+paste final_snp_set.rest_of_genome.melanogaster_state.melanogaster_counts.txt final_snp_set.rest_of_genome.simulans_state.simulans_counts.txt final_snp_set.rest_of_genome.yakuba_state.yakuba_counts.txt > final_snp_set.rest_of_genome.joined_counts.txt
+
+```
+
+###Build the input file:
+```{bash}
+
+cd /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline
+module load gcc/7.2.0
+module add gcc/7.2.0
+bedtools intersect -a final_snp_set.sum_gen0_gen20_gen30_allele_counts.extrapolated_to_100.focalsp_counts.bed -b final_snp_set.simulans_state.simulans_counts.bed -wb | bedtools intersect -a stdin -b final_snp_set.yakuba_state.yakuba_counts.bed -wb | awk '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$8,$12)}' > final_snp_set.joined_counts.bed
+awk '{printf ("%s\t%s\t%s\n", $4,$5,$6)}' final_snp_set.joined_counts.bed > final_snp_set.joined_counts.est_sfs_input.txt
+
+cat final_snp_set.joined_counts.est_sfs_input.txt final_snp_set.rest_of_genome.joined_counts.txt > final_snp_set_plus_rest_of_genome.joined_counts.est_sfs_input.txt
+
+```
+
+##Orthologs only:
+###Retrieve sequences from orthologous regions:
+```{bash}
+
+cd /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/orthologs
+module load gcc/7.2.0
+module add gcc/7.2.0
+
+#Generate bed file with all orthologous regions and the respective reference state:
+##For melanogaster:
+bedtools getfasta -fi /share/rdata/ramon.pouso/reference/indexed_reference/dmel-all-chromosome-r6.14.fasta -bed /share/rdata/ramon.pouso/outgroups/orthologs/dmel_dsim_dyak_orthologs.db_coord_sorted.bed -tab | awk -F"\t|:|-" '{printf ("%s\t%s\t%s\t%s\n", $1,$2,$3,$4)}' > dmel_dsim_dyak_orthologs.db_coord_sorted.melanogaster_state.intervals.bed
+
+#Check: total number of sites in the orthologous regions: 90581488
+
+##For simulans:
+bedtools getfasta -fi /share/rdata/ramon.pouso/outgroups/simulans/3processed/bwa_simulans_iso_rmdup_mq30_rg_multirealigned_major.fasta -bed /share/rdata/ramon.pouso/outgroups/orthologs/dmel_dsim_dyak_orthologs.db_coord_sorted.bed -tab | awk -F"\t|:|-" '{printf ("%s\t%s\t%s\t%s\n", $1,$2,$3,$4)}' > dmel_dsim_dyak_orthologs.db_coord_sorted.simulans_state.intervals.bed
+
+##For yakuba:
+bedtools getfasta -fi /share/rdata/ramon.pouso/outgroups/yakuba/3processed/bwa_yakuba_iso_rmdup_mq30_rg_multirealigned_major.fasta -bed /share/rdata/ramon.pouso/outgroups/orthologs/dmel_dsim_dyak_orthologs.db_coord_sorted.bed -tab | awk -F"\t|:|-" '{printf ("%s\t%s\t%s\t%s\n", $1,$2,$3,$4)}' > dmel_dsim_dyak_orthologs.db_coord_sorted.yakuba_state.intervals.bed
+
+#Check: total number of sites in the intervals: 90581488 (correct).
+#Check: total number of positions in chr2L in these intervals is 15705818.
+
+
+#Then split the intervals in bins of 1 bp:
+SPECIES=(yakuba) #melanogaster #simulans #yakuba
+rm dmel_dsim_dyak_orthologs.db_coord_sorted.${SPECIES}_state.positions.bed
+while read CHROMOSOME START END SEQUENCE;
+  do
+  START_COL=$(seq $START $(($END-1)))
+  END_COL=$(seq $(($START+1)) $END)
+  N_ROW=$(seq $START $(($END-1)) | wc -l)
+  CHR_COL=$(yes $CHROMOSOME | head -n$N_ROW)
+  SEQ_COL=$(echo $SEQUENCE | fold -w1)
+  paste <(printf %s "$CHR_COL") <(printf %s "$START_COL") <(printf %s "$END_COL") <(printf %s "$SEQ_COL") >> dmel_dsim_dyak_orthologs.db_coord_sorted.${SPECIES}_state.positions.bed
+  done < dmel_dsim_dyak_orthologs.db_coord_sorted.${SPECIES}_state.intervals.bed
+  
+#Check: total number of lines (positions) in chr2L is 15705818 (correct).
+
+```
+
+###Format SNPs:
+```{bash}
+
+#The bed files for the final SNP set were generated in the whole-genome section above.
+cd /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline
+module load gcc/7.2.0
+module add gcc/7.2.0
+
+##Melanogaster:
+bedtools intersect -a final_snp_set.sum_gen0_gen20_gen30_allele_counts.extrapolated_to_100.focalsp_counts.bed -b /share/rdata/ramon.pouso/outgroups/orthologs/dmel_dsim_dyak_orthologs.db_coord_sorted.bed | uniq > orthologs/final_snp_set.orthologs.sum_gen0_gen20_gen30_allele_counts.extrapolated_to_100.focalsp_counts.bed
+
+##Simulans:
+bedtools intersect -a final_snp_set.simulans_state.simulans_counts.bed -b /share/rdata/ramon.pouso/outgroups/orthologs/dmel_dsim_dyak_orthologs.db_coord_sorted.bed | uniq > orthologs/final_snp_set.orthologs.simulans_state.simulans_counts.bed
+
+##Yakuba:
+bedtools intersect -a final_snp_set.yakuba_state.yakuba_counts.bed -b /share/rdata/ramon.pouso/outgroups/orthologs/dmel_dsim_dyak_orthologs.db_coord_sorted.bed | uniq > orthologs/final_snp_set.orthologs.yakuba_state.yakuba_counts.bed
+
+#Check: they all have 1101074 lines (positions).
+
+#Join these files:
+cd /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/orthologs
+bedtools intersect -a final_snp_set.orthologs.sum_gen0_gen20_gen30_allele_counts.extrapolated_to_100.focalsp_counts.bed -b final_snp_set.orthologs.simulans_state.simulans_counts.bed -wb | bedtools intersect -a stdin -b final_snp_set.orthologs.yakuba_state.yakuba_counts.bed -wb | awk '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$8,$12)}' > final_snp_set.orthologs.joined_counts.bed
+
+#Check: it has 1101074 lines (positions), so it's correct.
+
+```
+
+###Format monomorphic:
+```{bash}
+
+cd /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/orthologs/
+module load gcc/7.2.0
+module add gcc/7.2.0
+
+##Melanogaster:
+bedtools subtract -a dmel_dsim_dyak_orthologs.db_coord_sorted.melanogaster_state.positions.bed -b final_snp_set.orthologs.sum_gen0_gen20_gen30_allele_counts.extrapolated_to_100.focalsp_counts.bed | awk '{if ($4=="A") printf ("%s\t%s\t%s\t%s,%s,%s,%s\n", $1,$2,$3,100,0,0,0);
+else if ($4=="C") printf ("%s\t%s\t%s\t%s,%s,%s,%s\n", $1,$2,$3,0,100,0,0);
+else if ($4=="G") printf ("%s\t%s\t%s\t%s,%s,%s,%s\n", $1,$2,$3,0,0,100,0);
+else if ($4=="T") printf ("%s\t%s\t%s\t%s,%s,%s,%s\n", $1,$2,$3,0,0,0,100);
+else printf ("%s\t%s\t%s\t%s,%s,%s,%s\n", $1,$2,$3,0,0,0,0);
+}' > final_snp_set.rest_of_genome.orthologs.melanogaster_state.melanogaster_counts.bed
+
+##Simulans and yakuba:
+SPECIES=(yakuba) #simulans #yakuba
+bedtools subtract -a dmel_dsim_dyak_orthologs.db_coord_sorted.${SPECIES}_state.positions.bed -b final_snp_set.orthologs.sum_gen0_gen20_gen30_allele_counts.extrapolated_to_100.focalsp_counts.bed | awk '{if ($4=="A") printf ("%s\t%s\t%s\t%s,%s,%s,%s\n", $1,$2,$3,1,0,0,0);
+else if ($4=="C") printf ("%s\t%s\t%s\t%s,%s,%s,%s\n", $1,$2,$3,0,1,0,0);
+else if ($4=="G") printf ("%s\t%s\t%s\t%s,%s,%s,%s\n", $1,$2,$3,0,0,1,0);
+else if ($4=="T") printf ("%s\t%s\t%s\t%s,%s,%s,%s\n", $1,$2,$3,0,0,0,1);
+else printf ("%s\t%s\t%s\t%s,%s,%s,%s\n", $1,$2,$3,0,0,0,0);
+}' > final_snp_set.rest_of_genome.orthologs.${SPECIES}_state.${SPECIES}_counts.bed
+
+#Check: they all have 89416093 lines (positions).
+
+#Join these files:
+##Option A: bedtools (safer but very slow, and might throw errors).
+cd /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/orthologs
+bedtools intersect -a final_snp_set.rest_of_genome.orthologs.melanogaster_state.melanogaster_counts.bed -b final_snp_set.rest_of_genome.orthologs.simulans_state.simulans_counts.bed -wb | bedtools intersect -a stdin -b final_snp_set.rest_of_genome.orthologs.yakuba_state.yakuba_counts.bed -wb | awk '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$8,$12)}' > final_snp_set.rest_of_genome.orthologs.joined_counts.bed
+
+##Option B: paste (make sure coordinates are maintained in the same row).
+paste <(cat final_snp_set.rest_of_genome.orthologs.melanogaster_state.melanogaster_counts.bed) <(cat final_snp_set.rest_of_genome.orthologs.simulans_state.simulans_counts.bed) <(cat final_snp_set.rest_of_genome.orthologs.simulans_state.simulans_counts.bed) | awk '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$8,$12)}' > final_snp_set.rest_of_genome.orthologs.joined_counts.bed
+
+#Check: it has 89416093 lines (positions), so it's correct.
+
+```
+
+###Build the input file:
+```{bash}
+
+cd /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline
+module load gcc/7.2.0
+module add gcc/7.2.0
+
+#Combine the SNPs and the monomorphic sites:
+cat final_snp_set.orthologs.joined_counts.bed final_snp_set.rest_of_genome.orthologs.joined_counts.bed | sort -k1,1 -k2,2n > final_snp_set_plus_rest_of_genome.orthologs.joined_counts.bed
+
+#Check: it has 90517167 lines (positions), which is the sum of 1101074 (SNPs) and 89416093 (monomorphic), so it's correct.
+
+#Generate the est-sfs input (one per chromosome):
+CHROMOSOMES=$(cut -f1 final_snp_set.orthologs.joined_counts.bed | uniq)
+for chr in ${CHROMOSOMES[@]}
+  do
+  echo "$chr"
+  awk -v chr=$chr '($1==chr) {printf ("%s\t%s\t%s\n", $4,$5,$6)}' final_snp_set_plus_rest_of_genome.orthologs.joined_counts.bed > final_snp_set_plus_rest_of_genome.orthologs.joined_counts.chr${chr}.est_sfs_input.txt
+  done
+
+```
+
+
+#Polarise with est-sfs:
+##Run the programme:
+###est-sfs.sh:
+```{bash}
+
+cd /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline
+module load gcc/7.2.0
+module add gcc/7.2.0
+est-sfs /share/rdata/ramon.pouso/polarisation/estsfs/program_files/config-rate6.txt final_snp_set_plus_rest_of_genome.joined_counts.est_sfs_input.txt /share/rdata/ramon.pouso/polarisation/estsfs/program_files/seedfile.txt /share/rdata/ramon.pouso/polarisation/estsfs/output/final_snp_set_plus_rest_of_genome.joined_counts.rate6.uSFS.txt /share/rdata/ramon.pouso/polarisation/estsfs/output/final_snp_set_plus_rest_of_genome.joined_counts.rate6.pval.txt
+
+```
+
+###Whole-genome:
+```{bash}
+
+cd /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline
+module load gcc/7.2.0
+module add gcc/7.2.0
+est-sfs /share/rdata/ramon.pouso/polarisation/estsfs/program_files/config-rate6.txt final_snp_set_plus_rest_of_genome.joined_counts.est_sfs_input.txt /share/rdata/ramon.pouso/polarisation/estsfs/program_files/seedfile.txt /share/rdata/ramon.pouso/polarisation/estsfs/output/final_snp_set_plus_rest_of_genome.joined_counts.rate6.uSFS.txt /share/rdata/ramon.pouso/polarisation/estsfs/output/final_snp_set_plus_rest_of_genome.joined_counts.rate6.pval.txt
+
+```
+
+###Half-genome (removing half of all monomorphic positions):
+```{bash}
+
+cd /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline
+module load gcc/7.2.0
+module add gcc/7.2.0
+est-sfs /share/rdata/ramon.pouso/polarisation/estsfs/program_files/config-rate6.txt final_snp_set_plus_half_of_genome.joined_counts.est_sfs_input.txt /share/rdata/ramon.pouso/polarisation/estsfs/program_files/seedfile.txt /share/rdata/ramon.pouso/polarisation/estsfs/output/final_snp_set_plus_half_of_genome.joined_counts.rate6.uSFS.txt /share/rdata/ramon.pouso/polarisation/estsfs/output/final_snp_set_plus_half_of_genome.joined_counts.rate6.pval.txt
+
+```
+
+###Tests
+```{bash}
+
+cd /share/rdata/ramon.pouso/polarisation/estsfs/tests
+
+#Run prueba1 with rate6 model:
+est-sfs config-rate6.txt prueba1.txt seedfile.txt prueba1_estsfs.rate6.uSFS.txt prueba1_estsfs.rate6.pval.txt
+
+#Run prueba2 with rate6 model:
+est-sfs config-rate6.txt prueba2.txt seedfile.txt prueba2_estsfs.rate6.uSFS.txt prueba2_estsfs.rate6.pval.txt
+
+#Run the programme with Kimura model:
+screen -S est_sfs_kimura_nrandom10.sorted.dani_variants
+script est_sfs_kimura_nrandom10.sorted.dani_variants.log
+
+time est-sfs /home/dkleinman/datos/est-sfs_tests/config-kimura.txt ./est_sfs_step4.sorted.dani_variants.input.txt /home/dkleinman/datos/est-sfs_tests/seedfile.txt ./est_sfs_step5.sorted.dani_variants.uSFS_kimura.txt ./est_sfs_step5.sorted.dani_variants.pvalues_kimura.txt
+
+
+cd /home/dkleinman/datos/est-sfs_tests/
+time est-sfs config-rate6.txt kaka_test.txt seedfile.txt kaka_test.uSFS.txt kaka_test.pvalues.txt
+
+cd /home/dkleinman/datos/est-sfs_tests/
+time est-sfs config-rate6.txt kaka_test2.txt seedfile.txt kaka_test2.uSFS.txt kaka_test2.pvalues.txt
+
+cd /home/dkleinman/datos/est-sfs_tests/
+time est-sfs config-rate6.txt kaka_test3.txt seedfile.txt kaka_test3.uSFS.txt kaka_test3.pvalues.txt
+
 ```
