@@ -1,0 +1,93 @@
+---
+title: "orthologs_database"
+output: html_document
+---
+
+#Orthologs database:
+##Download the raw database:
+```{R, engine='bash'}
+
+#I download this file to my computer: http://ftp.flybase.org/releases/FB2021_06/precomputed_files/orthologs/dmel_human_orthologs_disease_fb_2021_06.tsv.gz
+
+#And uploaded it to the server where I decompressed it: /share/rdata/ramon.pouso/outgroups/orthologs/dmel_orthologs_in_drosophila_species_fb_2021_06.tsv
+
+```
+
+##Retrieve mel-sim and mel-yak orthologs:
+```{R, engine='bash'}
+
+#First retrieve coordinates in bed format for all orthologs between all 3 species (melanogaster, simulans and yakuba).
+cd /share/rdata/ramon.pouso/outgroups/orthologs/
+MEL_GENES=$(grep -v '#' dmel_orthologs_in_drosophila_species_fb_2021_06.tsv | cut -f1 | uniq)
+MEL_GENES_N=$(grep -v '#' dmel_orthologs_in_drosophila_species_fb_2021_06.tsv | cut -f1 | uniq | wc -l)
+COUNTER=0
+
+rm dmel_dsim_dyak_orthologs.db_gene_sorted.bed
+echo "processing genes"
+for gene in ${MEL_GENES[@]}
+  do
+  #echo $gene
+  GENE_GREP=$(grep $gene dmel_orthologs_in_drosophila_species_fb_2021_06.tsv)
+  if echo "$GENE_GREP" | grep -q "sim" && echo "$GENE_GREP" | grep -q "yak" 
+    then
+    echo "$GENE_GREP" | head -n1 | awk -F '\t|\\.\\.' '{printf "%s\t%s\t%s\t%s\n", $3,$4,$5,$2}' >> dmel_dsim_dyak_orthologs.db_gene_sorted.bed
+  fi
+  ((COUNTER++))
+  if [ $(( $COUNTER % 1000 )) == 0 ]
+    then
+    echo "processed $COUNTER genes out of $MEL_GENES_N"
+  fi
+  done
+  
+#Next use bedtools to sort it by coordinates, or the following code:
+LANG=en_EN sort -k1,1 -k2,2n dmel_dsim_dyak_orthologs.db_gene_sorted.bed > dmel_dsim_dyak_orthologs.db_coord_sorted.bed
+
+```
+
+#Subset BAM files for orthologs:
+##Adapt format of the database:
+```{R, engine='bash'}
+
+cd /share/rdata/ramon.pouso/outgroups/orthologs/
+awk '{printf "%s:%s-%s\n", $1,$2,$3}' dmel_dsim_dyak_orthologs.db_coord_sorted.bed > dmel_dsim_dyak_orthologs.db_coord_sorted.txt
+
+```
+
+##Option A (bedtools): intersect_orthologs.sh
+```{R, engine='bash'}
+
+module load gcc/7.2.0 
+module add gcc/7.2.0
+bedtools intersect -abam $1 -b /share/rdata/ramon.pouso/outgroups/orthologs/dmel_dsim_dyak_orthologs.db_coord_sorted.bed > $2
+# $1 is the input bam, $2 is the filtered bam
+
+```
+
+##Option B (samtools): orthologs_subset_bam.sh
+```{R, engine='bash'}
+
+module load samtools/1.4.1
+cat /share/rdata/ramon.pouso/outgroups/orthologs/dmel_dsim_dyak_orthologs.db_coord_sorted.txt | xargs samtools view -b $1 > $2
+# $1 is the input bam and $2 the filtered output bam.
+
+
+#The output bam is recognised as truncated by samtools.
+
+```
+
+#Test BWA mapping against UCSC alignments:
+##First choose 10 orthologous genes randomly:
+```{R, engine='bash'}
+
+#We'll pick a total of 10 genes randomly, 2 from each of the relevante chromosomes (2L, 2R, 3L, 3R, X).
+cd /share/rdata/ramon.pouso/outgroups/orthologs
+rm orthologs_subset_test.txt
+CHROMOSOMES=$(cut -f1 dmel_dsim_dyak_orthologs.db_coord_sorted.bed | uniq | egrep '2|3|X')
+for chr in ${CHROMOSOMES[@]}
+  do
+  echo $chr
+  grep $chr dmel_dsim_dyak_orthologs.db_coord_sorted.bed | shuf -n2 >> orthologs_subset_test.txt
+  done
+
+```
+
