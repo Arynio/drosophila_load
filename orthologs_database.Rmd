@@ -42,6 +42,9 @@ for gene in ${MEL_GENES[@]}
 #Next use bedtools to sort it by coordinates, or the following code:
 LANG=en_EN sort -k1,1 -k2,2n dmel_dsim_dyak_orthologs.db_gene_sorted.bed > dmel_dsim_dyak_orthologs.db_coord_sorted.bed
 
+#Finally, merge overlapping intervals:
+bedtools merge -i dmel_dsim_dyak_orthologs.db_coord_sorted.bed > dmel_dsim_dyak_orthologs.db_coord_sorted_merged.bed
+
 ```
 
 #Subset BAM files for orthologs:
