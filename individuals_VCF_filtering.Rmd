@@ -1,0 +1,70 @@
+---
+title: "individuals_VCF_filtering"
+output: html_document
+---
+
+#Autosomes:
+##individuals_VCF_filtering.sh: generate VCFs from gVCFs and apply filters.
+```{R, engine='bash'}
+
+#Launch this script as follows: qsub -cwd -l h=compute-0-9 /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Scripts/individuals_VCF_filtering.sh POP (replace POP with one the following Drosophila line names: Pb L16 L29 L42 L45 L51 L59)
+
+#Most of this pipeline was designed by Ramón & Humberto. I then introduced modifications.
+
+cd /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants
+POPULATION=$1
+POP_PATH=$(find -name "${POPULATION}*" | head -n1 | cut -d'/' -f2)
+echo "working with population" $POPULATION
+
+#!!!!!!SKIP THIS STEP (ALREADY DONE!):
+#Combine all variant files into one. Add --variant options for every individual that is to be processed.
+module load java/jre/1.8.0_73
+module load GATK/4.1.4
+#echo "combining all individual gVCFs into a population gVCF"
+#gatk CombineGVCFs \
+#-R /share/rdata/ramon.pouso/reference/indexed_reference/dmel-all-chromosome-r6.14.fasta \
+#--variant ${POP_PATH}/${POPULATION}-1_hap.g.vcf \
+#--variant ${POP_PATH}/${POPULATION}-2_hap.g.vcf \ ... ... #include all individuals manually
+#-O ${POP_PATH}/${POPULATION}-Allcomb_hap.g.vcf && 
+
+#Add genotype information to all variants.
+echo "adding genotype and annotation information"
+gatk GenotypeGVCFs -V ${POP_PATH}/${POPULATION}-Allcomb_hap.g.vcf -O ${POP_PATH}/${POPULATION}-Allcomb_hap_genotyped.g.vcf -R /share/rdata/ramon.pouso/reference/indexed_reference/dmel-all-chromosome-r6.14.fasta
+
+#!!!!!!SKIP THIS STEP for now (USELESS):
+#Delete GATK’s <NON_REF> tag, it creates compatibility problems with certain programs.
+#sed ‘s/<NON_REF>//g’ ${POP_PATH}/${POPULATION}-Allcomb_hap_genotyped.g.vcf > ${POP_PATH}/${POPULATION}-Allcomb_hap_genotyped_excised.g.vcf
+
+#Extract SNPs from gvcf file using bcftools. Remove multialelic SNPs and indels, monomorphic SNPs, and SNPs in the close proximity of indels (10 bp).
+echo "removing INDELs, monomorphic and multiallelic SNPs, and SNPs close to INDELs"
+mkdir -p ./${POP_PATH}/dani
+module load bcftools/1.9
+bcftools filter -e 'AC==0 || AC==AN' --SnpGap 10 ${POP_PATH}/${POPULATION}-Allcomb_hap_genotyped.g.vcf | bcftools view -m2 -M2 -v snps -O v -o ${POP_PATH}/dani/${POPULATION}-Allcomb_hap_genotyped_snps.vcf
+
+#Mask highly repeated, low-information areas.
+echo "removing repetitive regions"
+module load gcc/7.2.0
+module add gcc/7.2.0
+bedtools subtract -a ${POP_PATH}/dani/${POPULATION}-Allcomb_hap_genotyped_snps.vcf -b /share/rdata/ramon.pouso/reference/indexed_reference/dmel-r6.14_mask.bed -header > ${POP_PATH}/dani/${POPULATION}-Allcomb_hap_genotyped_snps_masked.vcf
+
+#!!!!!!SKIP THIS STEP for now (USELESS):
+#Add variant statistics to the INFO field of every variant for filtering.
+#gatk VariantAnnotator --variant ${POP_PATH}/dani/${POPULATION}-Allcomb_hap_genotyped_snps_masked.vcf --output ${POP_PATH}/dani/${POPULATION}-Allcomb_hap_genotyped_snps_masked_stats.vcf --annotation QualByDepth --annotation FisherStrand --annotation StrandOddsRatio --annotation RMSMappingQuality --annotation ReadPosRankSumTest
+
+#Filter variants using GATK’s recommended presets.
+echo "applying GATK's recommended hard-filters"
+gatk VariantFiltration -R /share/rdata/ramon.pouso/reference/indexed_reference/dmel-all-chromosome-r6.14.fasta -V ${POP_PATH}/dani/${POPULATION}-Allcomb_hap_genotyped_snps_masked.vcf \
+-filter "QD < 2.0" --filter-name "QD2" \
+-filter "FS > 60.0" --filter-name "FS60" \
+-filter "SOR > 3.0" --filter-name "SOR3" \
+-filter "MQRankSum < -12.5" --filter-name "MQRankSum-12.5" \
+-filter "ReadPosRankSum < -8.0" --filter-name "ReadPosRankSum-8" \
+-filter "QUAL < 30.0" --filter-name "QUAL30" \
+-filter "MQ < 40.0" --filter-name "MQ40" \
+-O ${POP_PATH}/dani/${POPULATION}-Allcomb_hap_genotyped_snps_masked_hf.vcf
+
+#Extract variants that have passed the filter.
+grep -e '^#' ${POP_PATH}/dani/${POPULATION}-Allcomb_hap_genotyped_snps_masked_hf.vcf > ${POP_PATH}/dani/${POPULATION}-Allcomb_hap_genotyped_snps_masked_hf_pass.vcf
+grep 'PASS' ${POP_PATH}/dani/${POPULATION}-Allcomb_hap_genotyped_snps_masked_hf.vcf >> ${POP_PATH}/dani/${POPULATION}-Allcomb_hap_genotyped_snps_masked_hf_pass.vcf
+
+```
