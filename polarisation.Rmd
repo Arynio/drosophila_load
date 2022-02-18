@@ -1180,27 +1180,80 @@ while read -r SCAFFOLD START STOP ANCESTRAL REFERENCE; do
 #8. Polarize the VCFs.
 ##Obtain final VCFs.
 ###POOLS.
+####Gens0-40:
 ```{bash}
 
-#Now that the AA information has been retrieved, for each dataset combine the autosomic and the X files and then filter the resulting VCF in order to keep only those positions with AA information:
+#Now that the AA information has been retrieved, for each dataset combine the autosomic and the X files and then filter the resulting VCF in order to keep only those positions with AA information. The DP_EM_filtered version of the VCFs was already used as the starting point to select the variants in the bed file used here, so it's OK to use the unfiltered version of the VCF here.
+module load bcftools/1.9
 module load gcc/7.2.0
 module add gcc/7.2.0
 cd /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/
-cat CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.vcf <(grep -v '#' CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.vcf) | bedtools intersect -a stdin -b /share/rdata/ramon.pouso/polarisation/estsfs/output/final_snp_set.orthologs.sum_gen0_gen20_gen30_allele_counts.extrapolated_to_100.ancestral_vs_derived_complete.confident.rate6.pval.bed -header | grep -v '##' > crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.vcf #The DP_EM_filtered version of the VCFs was already used as the starting point to select the variants in the bed file used here, so it's OK to use the unfiltered version of the VCF here.
 
-cd /share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/masked/
-cat crisp_all_gen140_autosomic_masked.recode_snps.vcf <(grep -v '#' crisp_all_gen140_x_masked.recode_snps.vcf) | bedtools intersect -a stdin -b /share/rdata/ramon.pouso/polarisation/estsfs/output/final_snp_set.orthologs.sum_gen0_gen20_gen30_allele_counts.extrapolated_to_100.ancestral_vs_derived_complete.confident.rate6.pval.bed -header | grep -v '##' > crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.vcf
+#First generate list of common names for both VCF files (remove the autosomic/x part):
+bcftools query -l CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.vcf | rev | cut -d'_' -f2- | rev > sample_names.list
+
+#Then for the autosomic file, change the names, compress the file and index it:
+bcftools reheader --samples sample_names.list CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.vcf > CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.fixed_names.vcf
+/DATA/APPS/freebayes/25.03.19/SeqLib/htslib/bgzip -c CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.fixed_names.vcf > CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.fixed_names.vcf.gz
+/DATA/APPS/freebayes/25.03.19/SeqLib/htslib/tabix -p vcf CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.fixed_names.vcf.gz
+
+#Same for the Xchr file:
+bcftools reheader --samples sample_names.list CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.vcf > CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.fixed_names.vcf
+/DATA/APPS/freebayes/25.03.19/SeqLib/htslib/bgzip -c CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.fixed_names.vcf > CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.fixed_names.vcf.gz
+/DATA/APPS/freebayes/25.03.19/SeqLib/htslib/tabix -p vcf CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.fixed_names.vcf.gz
+
+#Finally, concatenate both files:
+bcftools concat CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.fixed_names.vcf.gz CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.fixed_names.vcf.gz | bedtools intersect -a stdin -b /share/rdata/ramon.pouso/polarisation/estsfs/output/final_snp_set.orthologs.sum_gen0_gen20_gen30_allele_counts.extrapolated_to_100.ancestral_vs_derived_complete.confident.rate6.pval.bed -header > crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.vcf
+
+#And edit some problematic spaces in the header (otherwise vcftools won't be able to deal with them later on):
+sed -i 's/Description=" >/Description=">/g' crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.vcf
 
 ```
 
-##Fill the VCFs with the ancestral allele annotation.
-###Set PERL5LIB variable: 
+####Gen140:
 ```{bash}
 
-export PERL5LIB=/DATA/APPS/vcftools/0.1.17/lib/site_perl/5.24.1/ #set required environmental variable so that fill-aa can work.
+#Now that the AA information has been retrieved, for each dataset combine the autosomic and the X files and then filter the resulting VCF in order to keep only those positions with AA information. The DP_EM_filtered version of the VCFs was already used as the starting point to select the variants in the bed file used here, so it's OK to use the unfiltered version of the VCF here.
+module load bcftools/1.9
+module load gcc/7.2.0
+module add gcc/7.2.0
+cd /share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/masked/
+
+#First generate list of common names for both VCF files (remove the autosomic/x part):
+bcftools query -l crisp_all_gen140_autosomic_masked.recode_snps.vcf | rev | cut -d'_' -f2- | rev > sample_names.list
+
+#Then for the autosomic file, change the names, compress the file and index it:
+bcftools reheader --samples sample_names.list crisp_all_gen140_autosomic_masked.recode_snps.vcf > crisp_all_gen140_autosomic_masked.recode_snps.fixed_names.vcf
+/DATA/APPS/freebayes/25.03.19/SeqLib/htslib/bgzip -c crisp_all_gen140_autosomic_masked.recode_snps.fixed_names.vcf > crisp_all_gen140_autosomic_masked.recode_snps.fixed_names.vcf.gz
+/DATA/APPS/freebayes/25.03.19/SeqLib/htslib/tabix -p vcf crisp_all_gen140_autosomic_masked.recode_snps.fixed_names.vcf.gz
+
+#Same for the Xchr file:
+bcftools reheader --samples sample_names.list crisp_all_gen140_x_masked.recode_snps.vcf > crisp_all_gen140_x_masked.recode_snps.fixed_names.vcf
+/DATA/APPS/freebayes/25.03.19/SeqLib/htslib/bgzip -c crisp_all_gen140_x_masked.recode_snps.fixed_names.vcf > crisp_all_gen140_x_masked.recode_snps.fixed_names.vcf.gz
+/DATA/APPS/freebayes/25.03.19/SeqLib/htslib/tabix -p vcf crisp_all_gen140_x_masked.recode_snps.fixed_names.vcf.gz
+
+#Finally, concatenate both files:
+bcftools concat crisp_all_gen140_autosomic_masked.recode_snps.fixed_names.vcf.gz crisp_all_gen140_x_masked.recode_snps.fixed_names.vcf.gz | bedtools intersect -a stdin -b /share/rdata/ramon.pouso/polarisation/estsfs/output/final_snp_set.orthologs.sum_gen0_gen20_gen30_allele_counts.extrapolated_to_100.ancestral_vs_derived_complete.confident.rate6.pval.bed -header > crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.vcf
+
+#And edit some problematic spaces in the header (otherwise vcftools won't be able to deal with them later on):
+sed -i 's/Description=" >/Description=">/g' crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.vcf
 
 ```
 
+###INDIVIDUALS.
+```{bash}
+
+#Go to script: individuals_VCF_filtering.Rmd
+#The final datasets are the following:
+##Autosomes:
+/share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.final_snp_set.vcf
+##Xchr:
+/share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.final_snp_set.vcf
+
+```
+
+
+##Fill the VCFs with the ancestral allele annotation.
 ###fill-aa.sh: 
 ```{bash}
 
@@ -1213,3 +1266,101 @@ cat $1 | fill-aa -a /share/rdata/ramon.pouso/reference/indexed_reference/ancestr
 
 ```
 
+###Comments: 
+```{bash}
+
+#I launched fill-aa.sh (locally, not with qsub due to problems with PERL5LIB) for the following VCF files:
+
+##Pools gens0-40 (autosomic + Xchr):
+/share/rdata/ramon.pouso/Scripts/fill-aa.sh /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.vcf
+##Pools gen140 (autosomic + Xchr):
+/share/rdata/ramon.pouso/Scripts/fill-aa.sh /share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/masked/crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.vcf
+##Individuals, all lines (autosomic):
+/share/rdata/ramon.pouso/Scripts/fill-aa.sh /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.final_snp_set.vcf
+##Individuals, all lines (Xchr):
+/share/rdata/ramon.pouso/Scripts/fill-aa.sh /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.final_snp_set.vcf
+
+```
+
+##Polarize the AA-filled VCF.
+###POOLS.
+```{bash}
+
+#Polarize the AA-filled VCF based on the new INFO/AA column. Alleles will be switched whenever the ancestral allele matches the alternative one, and AD and AF columns will be properly recoded. Not the rest!!!
+
+module load bcftools/1.9 
+
+FILE=/share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.aafilled.vcf
+#/share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.aafilled.vcf #/share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/masked/crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.aafilled.vcf
+
+N_IND=$(bcftools query -l $FILE | wc -l)
+ID_FIRST=$(bcftools query -l $FILE | head -n1)
+N_FIRST=$(grep -v '##' $FILE | grep '#' | tr "\t" "\n" | grep -n $ID_FIRST | cut -d':' -f1)
+grep -v '#' $FILE | awk -F"\t|AA=" '$4==$9' > ${FILE/.vcf/.consistent.vcf}
+grep -v '#' $FILE | awk -F"\t|AA=" '$5==$9' | awk -F";AF=|;EMstats=" '{printf ("%s;AF=%s;EMstats=%s\n", $1,1-$2,$3)}' > ${FILE/.vcf/.inconsistent.vcf}
+cut -f-$((N_FIRST-1)) ${FILE/.vcf/.inconsistent.vcf} | awk '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$5,$4,$6,$7,$8,$9,$10)}' > ${FILE/.vcf/.inconsistent.polarized.vcf}
+for col in $(seq $N_FIRST $((N_FIRST+N_IND-1)))
+  do
+  echo "processing individual in column number" $col
+  paste ${FILE/.vcf/.inconsistent.polarized.vcf} <(cut -f$col ${FILE/.vcf/.inconsistent.vcf} | awk -F":|," '{printf ("%s:%s:%s:%s,%s:%s,%s:%s,%s\n", $1,$2,$3,$5,$4,$7,$6,$9,$8)}') > ${FILE/.vcf/.inconsistent.temp}
+  mv ${FILE/.vcf/.inconsistent.temp} ${FILE/.vcf/.inconsistent.polarized.vcf}
+  done
+cat <(grep '#' $FILE) ${FILE/.vcf/.consistent.vcf} ${FILE/.vcf/.inconsistent.polarized.vcf} | bcftools sort > ${FILE/.aafilled.vcf/.polarized.vcf} 
+
+#Sanity checks:
+##No rows were dropped in the gens0-40 polarized file has X rows.
+##The gen140 polarized file has 830653 rows instead of 830657 because there were 4 SNPs with AA!=REF & AA!=ALT (a third allele), which were dropped.
+
+```
+
+###INDIVIDUALS.
+```{bash}
+
+#Polarize the AA-filled VCF based on the new INFO/AA column. Alleles will be switched whenever the ancestral allele matches the alternative one, and genotypes will be properly recoded as well. The following code was originally provided by Pierre Lindenbaum and modified by José Luis Castro.
+
+FILE=Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.final_snp_set.aafilled.vcf #Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.final_snp_set.aafilled.vcf #Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.final_snp_set.aafilled.vcf
+
+java -jar /DATA/APPS/jvarkit/dist/vcffilterjdk.jar -e 'if(variant.getNAlleles()!=2 || !variant.hasAttribute("AA")) return true; 
+final String aa = variant.getAttributeAsString("AA",""); 
+if(!variant.getAlleles().get(1).getDisplayString().equalsIgnoreCase(aa)) return true; 
+VariantContextBuilder vb=new VariantContextBuilder(variant); 
+
+Allele oldalt = variant.getAlleles().get(1);
+Allele oldref = variant.getAlleles().get(0); 
+Allele ref= Allele.create(oldalt.getDisplayString(),true); 
+Allele alt= Allele.create(oldref.getDisplayString(),false);
+
+vb.alleles(Arrays.asList(ref,alt)); 
+
+List genotypes= new ArrayList<>(); 
+for(Genotype g: variant.getGenotypes()) 
+  { 
+  if(!g.isCalled()) 
+  { genotypes.add(g); continue;} 
+  GenotypeBuilder gb = new GenotypeBuilder(g); 
+  List alleles = new ArrayList<>(); 
+  for(Allele a:g.getAlleles()) { 
+    if(a.equals(oldalt)) { a=ref;} 
+    else if(a.equals(oldref)) { a=alt;} 
+    alleles.add(a); 
+    } 
+  if(g.hasPL()) { 
+    int pl[] = g.getPL(); 
+    int pl2[] = new int[pl.length]; 
+    for(int i=0;i< pl.length;i++) pl2[i]=pl[(pl.length-1)-i]; 
+    gb.PL(pl2); 
+    } 
+  if(g.hasAD()) 
+    { int ad[] = g.getAD(); 
+    int ad2[] = new int[ad.length]; 
+    for(int i=0;i< ad.length;i++) ad2[i]=ad[(ad.length-1)-i];
+    gb.AD(ad2); 
+  } 
+  genotypes.add(gb.alleles(alleles).make()); 
+  }
+
+vb.attribute("AF",1.0d - Double.parseDouble(variant.getAttributeAsString("AF",""))); vb.attribute("AC",variant.getGenotypes().stream().flatMap(G->G.getAlleles().stream()).filter(A->A.equals(oldref)).count()); 
+vb.genotypes(genotypes); 
+return vb.make();' -o ${FILE/.aafilled.vcf/.polarized.vcf} $FILE
+
+```
