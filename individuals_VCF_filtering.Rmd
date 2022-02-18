@@ -68,3 +68,166 @@ grep -e '^#' ${POP_PATH}/dani/${POPULATION}-Allcomb_hap_genotyped_snps_masked_hf
 grep 'PASS' ${POP_PATH}/dani/${POPULATION}-Allcomb_hap_genotyped_snps_masked_hf.vcf >> ${POP_PATH}/dani/${POPULATION}-Allcomb_hap_genotyped_snps_masked_hf_pass.vcf
 
 ```
+
+##Merge lines and keep sites from POOLS:
+```{R, engine='bash'}
+
+cd /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants
+module load bcftools/1.9
+module load gcc/7.2.0
+module add gcc/7.2.0
+
+#First, compress the VCFs with bgzip so that bcftools accepts them, and index the compressed files:
+FILES=$(find . -name *-Allcomb_hap_genotyped_snps_masked_hf_pass.vcf -print)
+for f in ${FILES[@]}; do echo $f; /DATA/APPS/freebayes/25.03.19/SeqLib/htslib/bgzip -c $f > ${f/.vcf/.vcf.gz}; /DATA/APPS/freebayes/25.03.19/SeqLib/htslib/tabix -p vcf ${f/.vcf/.vcf.gz}; done
+
+#Next, use bcftools to merge them and bedtools to filter the final autosomal SNP set (obtained in the polarisation section).
+find . -name *-Allcomb_hap_genotyped_snps_masked_hf_pass.vcf.gz -print > Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.bcftools_merge.list
+bcftools merge -l Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.bcftools_merge.list -O v -o Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.vcf
+rm Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.bcftools_merge.list
+awk '$1!="X"' /share/rdata/ramon.pouso/polarisation/estsfs/output/final_snp_set.orthologs.sum_gen0_gen20_gen30_allele_counts.extrapolated_to_100.ancestral_vs_derived_complete.confident.rate6.pval.bed | bedtools intersect -a Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.vcf -b stdin -header > Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.final_snp_set.vcf
+
+```
+
+#Xchr:
+##Define population and launch the script (see script in the next section)
+```{R, engine='bash'}
+
+#Here we'll select the population and then define the number of individuals to launch simultaneously in an array, and launch the calling:
+
+cd /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/5processed/
+POP=Pb-B #Define which line to use among the following: #Pb-B #L16 #L29 #L42 #L45 #L51 #L59
+CHUNK=6 #If POP=Pb, then define the chunk (from 1 to 6). For the other lines, always leave this as CHUNK=1.
+
+N_IND=$(ls ${POP}*.bam | wc -l)
+MAX_IND=$(ls Pb*.bam | wc -l)
+if (( N_IND < 10 )); then N_ARRAY=$N_IND; else N_ARRAY=9; fi
+START=$((((((CHUNK-1))*N_ARRAY))+1))
+END=$((CHUNK*N_ARRAY))
+if (( END > MAX_IND )); then END=$MAX_IND; fi
+echo "working with line" $POP "which has" $N_IND "individuals that will be launched in groups of" $N_ARRAY
+qsub -cwd -l h=compute-0-9 -t $START-$END /share/rdata/ramon.pouso/INDIVIDUOS/gen40/Scripts/individuals_VCF_Xchr_calling.sh $POP
+
+```
+
+##individuals_VCF_Xchr_calling.sh: generate the Xchr gVCF for each individual.
+```{R, engine='bash'}
+
+#To learn how to launch this script, see section "Define population and launch the script" in the individuals_VCF_filtering.Rmd pipeline (in GitHub).
+
+cd /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/
+POP=$1
+POP_PATH=$(find -name "${POP}*" | head -n1 | cut -d'/' -f2)
+SAMPLE=`(sed -n ${SGE_TASK_ID}p <(ls /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/5processed/${POP}*.bam)) | cut -d'/' -f9 | cut -d'_' -f1 | rev | cut -d'-' -f1 | rev`
+
+module load java/jre/1.8.0_73
+module load GATK/4.1.4
+gatk HaplotypeCaller -I /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/5processed/${POP}-${SAMPLE}_bwa_iso_rmdup_mq20_rg.bam -O /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/${POP_PATH}/${POP}-${SAMPLE}_xhap.g.vcf -R /share/rdata/ramon.pouso/reference/indexed_reference/dmel-all-chromosome-r6.14.fasta -L /share/rdata/ramon.pouso/INDIVIDUOS/gen40/regions_of_interest_x.bed -ploidy 1 -ERC BP_RESOLUTION -stand-call-conf 10.0
+
+```
+
+##individuals_VCF_Xchr_combine.sh: combine all individual Xchr gVCF for each population.
+```{R, engine='bash'}
+
+#Launch this script as follows: qsub -cwd -l h=compute-0-9 /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Scripts/individuals_VCF_Xchr_combine.sh POP (replace POP with one of the following Drosophila line names: Pb-B L16 L29 L42 L45 L51 L59)
+
+cd /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/
+POP=$1
+POP_PATH=$(find -name "${POP}*" | head -n1 | cut -d'/' -f2)
+SAMPLE=$(ls ${POP_PATH}/${POP}*_xhap.g.vcf)
+
+module load java/jre/1.8.0_73
+module load GATK/4.1.4
+gatk CombineGVCFs -R /share/rdata/ramon.pouso/reference/indexed_reference/dmel-all-chromosome-r6.14.fasta -L /share/rdata/ramon.pouso/INDIVIDUOS/gen40/regions_of_interest_x.bed \
+$(for s in ${SAMPLE[@]}; do echo "--variant ${s}"; done) \
+-O ${POP_PATH}/${POP}-Allcomb_xhap.g.vcf
+
+```
+
+
+
+##individuals_VCF_x_filtering.sh: generate VCFs from gVCFs and apply filters.
+```{R, engine='bash'}
+
+#Launch this script as follows: qsub -cwd -l h=compute-0-9 /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Scripts/individuals_VCF_x_filtering.sh POP (replace POP with one of the following Drosophila line names: Pb-B L16 L29 L42 L45 L51 L59)
+
+#Most of this pipeline was designed by Ramón & Humberto. I then introduced modifications.
+
+cd /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants
+POPULATION=$1
+POP_PATH=$(find -name "${POPULATION}*" | head -n1 | cut -d'/' -f2)
+echo "working with population" $POPULATION
+
+#!!!!!!SKIP THIS STEP (ALREADY DONE!):
+#Combine all variant files into one. Add --variant options for every individual that is to be processed.
+module load java/jre/1.8.0_73
+module load GATK/4.1.4
+#echo "combining all individual gVCFs into a population gVCF"
+#gatk CombineGVCFs \
+#-R /share/rdata/ramon.pouso/reference/indexed_reference/dmel-all-chromosome-r6.14.fasta \
+#--variant ${POP_PATH}/${POPULATION}-1_xhap.g.vcf \
+#--variant ${POP_PATH}/${POPULATION}-2_xhap.g.vcf \ ... ... #include all individuals manually
+#-O ${POP_PATH}/${POPULATION}-Allcomb_xhap.g.vcf && 
+
+#Add genotype information to all variants.
+echo "adding genotype and annotation information"
+gatk GenotypeGVCFs -V ${POP_PATH}/${POPULATION}-Allcomb_xhap.g.vcf -O ${POP_PATH}/${POPULATION}-Allcomb_xhap_genotyped.g.vcf -R /share/rdata/ramon.pouso/reference/indexed_reference/dmel-all-chromosome-r6.14.fasta
+
+#!!!!!!SKIP THIS STEP for now (USELESS):
+#Delete GATK’s <NON_REF> tag, it creates compatibility problems with certain programs.
+#sed ‘s/<NON_REF>//g’ ${POP_PATH}/${POPULATION}-Allcomb_xhap_genotyped.g.vcf > ${POP_PATH}/${POPULATION}-Allcomb_xhap_genotyped_excised.g.vcf
+
+#Extract SNPs from gvcf file using bcftools. Remove multialelic SNPs and indels, monomorphic SNPs, and SNPs in the close proximity of indels (10 bp).
+echo "removing INDELs, monomorphic and multiallelic SNPs, and SNPs close to INDELs"
+mkdir -p ./${POP_PATH}/dani
+module load bcftools/1.9
+bcftools filter -e 'AC==0 || AC==AN' --SnpGap 10 ${POP_PATH}/${POPULATION}-Allcomb_xhap_genotyped.g.vcf | bcftools view -m2 -M2 -v snps -O v -o ${POP_PATH}/dani/${POPULATION}-Allcomb_xhap_genotyped_snps.vcf
+
+#Mask highly repeated, low-information areas.
+echo "removing repetitive regions"
+module load gcc/7.2.0
+module add gcc/7.2.0
+bedtools subtract -a ${POP_PATH}/dani/${POPULATION}-Allcomb_xhap_genotyped_snps.vcf -b /share/rdata/ramon.pouso/reference/indexed_reference/dmel-r6.14_mask.bed -header > ${POP_PATH}/dani/${POPULATION}-Allcomb_xhap_genotyped_snps_masked.vcf
+
+#!!!!!!SKIP THIS STEP for now (USELESS):
+#Add variant statistics to the INFO field of every variant for filtering.
+#gatk VariantAnnotator --variant ${POP_PATH}/dani/${POPULATION}-Allcomb_xhap_genotyped_snps_masked.vcf --output ${POP_PATH}/dani/${POPULATION}-Allcomb_xhap_genotyped_snps_masked_stats.vcf --annotation QualByDepth --annotation FisherStrand --annotation StrandOddsRatio --annotation RMSMappingQuality --annotation ReadPosRankSumTest
+
+#Filter variants using GATK’s recommended presets.
+echo "applying GATK's recommended hard-filters"
+gatk VariantFiltration -R /share/rdata/ramon.pouso/reference/indexed_reference/dmel-all-chromosome-r6.14.fasta -V ${POP_PATH}/dani/${POPULATION}-Allcomb_xhap_genotyped_snps_masked.vcf \
+-filter "QD < 2.0" --filter-name "QD2" \
+-filter "FS > 60.0" --filter-name "FS60" \
+-filter "SOR > 3.0" --filter-name "SOR3" \
+-filter "MQRankSum < -12.5" --filter-name "MQRankSum-12.5" \
+-filter "ReadPosRankSum < -8.0" --filter-name "ReadPosRankSum-8" \
+-filter "QUAL < 30.0" --filter-name "QUAL30" \
+-filter "MQ < 40.0" --filter-name "MQ40" \
+-O ${POP_PATH}/dani/${POPULATION}-Allcomb_xhap_genotyped_snps_masked_hf.vcf
+
+#Extract variants that have passed the filter.
+grep -e '^#' ${POP_PATH}/dani/${POPULATION}-Allcomb_xhap_genotyped_snps_masked_hf.vcf > ${POP_PATH}/dani/${POPULATION}-Allcomb_xhap_genotyped_snps_masked_hf_pass.vcf
+grep 'PASS' ${POP_PATH}/dani/${POPULATION}-Allcomb_xhap_genotyped_snps_masked_hf.vcf >> ${POP_PATH}/dani/${POPULATION}-Allcomb_xhap_genotyped_snps_masked_hf_pass.vcf
+
+```
+
+##Merge lines and keep sites from POOLS:
+```{R, engine='bash'}
+
+cd /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants
+module load bcftools/1.9
+module load gcc/7.2.0
+module add gcc/7.2.0
+
+#First, compress the VCFs with bgzip so that bcftools accepts them, and index the compressed files:
+FILES=$(find . -name *-Allcomb_xhap_genotyped_snps_masked_hf_pass.vcf -print)
+for f in ${FILES[@]}; do echo $f; /DATA/APPS/freebayes/25.03.19/SeqLib/htslib/bgzip -c $f > ${f/.vcf/.vcf.gz}; /DATA/APPS/freebayes/25.03.19/SeqLib/htslib/tabix -p vcf ${f/.vcf/.vcf.gz}; done
+
+#Next, use bcftools to merge them and bedtools to filter the final autosomal SNP set (obtained in the polarisation section).
+find . -name *-Allcomb_xhap_genotyped_snps_masked_hf_pass.vcf.gz -print > Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.bcftools_merge.list
+bcftools merge -l Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.bcftools_merge.list -O v -o Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.vcf
+rm Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.bcftools_merge.list
+awk '$1=="X"' /share/rdata/ramon.pouso/polarisation/estsfs/output/final_snp_set.orthologs.sum_gen0_gen20_gen30_allele_counts.extrapolated_to_100.ancestral_vs_derived_complete.confident.rate6.pval.bed | bedtools intersect -a Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.vcf -b stdin -header > Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.final_snp_set.vcf
+
+```
+
