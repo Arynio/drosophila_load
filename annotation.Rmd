@@ -1,0 +1,140 @@
+---
+title: "annotation"
+output: html_document
+---
+
+#1. Carry out general annotation with ANNOVAR:
+##Build the drosophila database.
+###Good version (changes codes in the UCSC database).
+```{R, engine='bash'}
+
+mkdir -p /share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/ancestral_dm6/
+cd /share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/ancestral_dm6/
+#Note: any code involving annotate_variation.pl won't work because apparently the server blocks it's attempts to download files from an external website, so I had to replace it with alternative code.
+
+#First download, uncompress and rename the gene database:
+wget https://hgdownload.cse.ucsc.edu/goldenPath/dm6/database/refGene.txt.gz
+gunzip -c refGene.txt.gz > dm6_refGene.txt
+
+#Next, download the chromosome names equivalence file (aka "alias" or "dictionary"), which we'll need to edit the gene database so that the scaffolds use the same nomenclature as our files:
+wget https://hgdownload.cse.ucsc.edu/goldenPath/dm6/bigZips/dm6.chromAlias.txt
+nano dm6.chromAlias.txt #edit it to add "mitochondrion_genome" in the fourth column for the row that starts with chrM.
+
+#Then we can replace all database names with the UCSC names, which are used in our VCFs and fasta files.
+DB_CODES=$(cut -f3 dm6_refGene.txt | sort | uniq)
+for old_code in ${DB_CODES[@]}
+  do
+  new_code=$(awk -v old=$old_code '$1==old' /share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/ancestral_dm6/dm6.chromAlias.txt | cut -f4)
+  echo "${old_code} -> ${new_code}"
+  sed -i -e "s/\<$old_code\>/$new_code/g" dm6_refGene.txt
+  done
+
+diff <(cut -f-2,4- dm6_refGene.txt) <(cut -f-2,4- refGene.txt) #checks whether the previous loop modified any other field. Since no lines are returned, both files are identical (outside of the 3rd column, which was changed).
+
+#Copy the ancestral fasta (obtained in the polarisation.Rmd script) to the aproppriate folder:
+scp -p /share/rdata/ramon.pouso/reference/indexed_reference/ancestral_dmel-all-chromosome-r6.14.fa dm6_seq/dm6_ancestral_dmel-all-chromosome-r6.14.fa
+
+#Next, use annovar to build the gene database:
+module load annovar/4.19
+retrieve_seq_from_fasta.pl dm6_refGene.txt -seqfile dm6_seq/dm6_ancestral_dmel-all-chromosome-r6.14.fa -format refGene -outfile dm6_refGeneMrna.fa
+
+```
+
+###Obsolete version (changes codes in the reference fasta).
+```{R, engine='bash'}
+
+mkdir -p /share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/ancestral_dm6/
+cd /share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/ancestral_dm6/
+#Note: any code involving annotate_variation.pl won't work because apparently the server blocks it's attempts to download files from an external website, so I had to replace it with alternative code.
+
+#First download, uncompress and rename the gene database:
+wget https://hgdownload.cse.ucsc.edu/goldenPath/dm6/database/refGene.txt.gz
+gunzip -c refGene.txt.gz > dm6_refGene.txt
+
+#Next, download the chromosome names equivalence file (aka "alias" or "dictionary"), which we'll need to edit the ancestral fasta so that the scaffolds use the same nomenclature as the gene database:
+wget https://hgdownload.cse.ucsc.edu/goldenPath/dm6/bigZips/dm6.chromAlias.txt -P dm6_seq/
+nano dm6.chromAlias.txt #edit it to add "mitochondrion_genome" in the fourth column for the row that starts with chrM.
+
+#Copy the ancestral fasta (obtained in the polarisation.Rmd script) to the aproppriate folder:
+scp -p /share/rdata/ramon.pouso/reference/indexed_reference/ancestral_dmel-all-chromosome-r6.14.fa dm6_seq/dm6_ancestral_dmel-all-chromosome-r6.14.fa
+
+#Then we need to replace all scaffold names with the gene database version. However, first we need to fix a few scaffolds which have a longer version of the name (ending in "_D1XXX") than the one in the dictionary, replacing them with the shorter version.
+TO_FIX_CODES=$(grep "_D1" dm6_seq/dm6_ancestral_dmel-all-chromosome-r6.14.fa)
+for to_fix_code in ${TO_FIX_CODES[@]}
+  do
+  fixed=$(echo $to_fix_code | awk -F"_D1" '{print $1}')
+  echo "${to_fix_code} -> ${fixed}"
+  sed -i -e "s/$to_fix_code/$fixed/g" dm6_seq/dm6_ancestral_dmel-all-chromosome-r6.14.fa
+  done
+
+#Then we can replace all UCSC names with the other sequence name, the one that appears in the gene database.
+UCSC_CODES=$(tail -n+2 /share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/ancestral_dm6/dm6_seq/dm6.chromAlias.txt | cut -f4)
+for old_code in ${UCSC_CODES[@]}
+  do
+  new_code=$(awk -v old=$old_code '$4==old' /share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/ancestral_dm6/dm6_seq/dm6.chromAlias.txt | cut -f1)
+  echo "${old_code} -> ${new_code}"
+  sed -i -e "s/\<$old_code\>/$new_code/g" dm6_seq/dm6_ancestral_dmel-all-chromosome-r6.14.fa
+  done
+
+#Use this only if the previous loop was run before the first (UCSC_CODES before TO_FIX_CODES). This will replace the remaining old names.
+#UCSC_CODES=$(comm -12 <(sort <(tail -n+2 /share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/ancestral_dm6/dm6_seq/dm6.chromAlias.txt | cut -f4)) <(sort <(grep ">" dm6_seq/dm6_ancestral_dmel-all-chromosome-r6.14.fa | cut -d">" -f2)))
+#for old_code in ${UCSC_CODES[@]}
+#  do
+#  new_code=$(awk -v old=$old_code '$4==old' /share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/ancestral_dm6/dm6_seq/dm6.chromAlias.txt | cut -f1)
+#  echo "${old_code} -> ${new_code}"
+#  sed -i -e "s/\<$old_code\>/$new_code/g" dm6_seq/dm6_ancestral_dmel-all-chromosome-r6.14.fa
+#  done
+
+#Next, use annovar to build the gene database:
+module load annovar/4.19
+retrieve_seq_from_fasta.pl dm6_refGene.txt -seqfile dm6_seq/dm6_ancestral_dmel-all-chromosome-r6.14.fa -format refGene -outfile dm6_refGeneMrna.fa
+
+```
+
+##Annotate the VCFs.
+###POOLS:
+```{R, engine='bash'}
+
+module load annovar/4.19
+module load gcc/7.2.0 
+module add gcc/7.2.0 
+
+#Define which VCF to work with, and its appropriate path:
+GEN="gen140" #"gen0-40" #gen140
+if [ $GEN == "gen0-40" ]
+  then
+  cd /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/
+elif [ $GEN == "gen140" ]
+  then
+  cd /share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/masked/
+fi
+FILE=crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.polarized.vcf
+
+#First convert from VCF to table (annovar can't deal with the particular format of the pool. VCFs) 
+convert2annovar.pl -format vcf4old --outfile ${FILE/.vcf/.annovar} $FILE
+
+#Next, annotate the table. The resulting file is automatically labelled as .vcf by the programme, even though it really isn't a VCF.
+table_annovar.pl ${FILE/.vcf/.annovar} /share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/ancestral_dm6 -vcfinput --outfile ${FILE/.vcf/.annovar} -buildver dm6 --protocol refGene --operation g
+
+#Convert the annotated table to a .bed.
+mv ${FILE/.vcf/.annovar}.dm6_multianno.vcf ${FILE/.vcf/.annovar}.dm6_multianno.tab
+awk -F"\t|;ANNOVAR_DATE" '{printf ("%s\t%s\t%s\tANNOVAR_DATE%s\n"),$1,$2-1,$3,$9}' ${FILE/.vcf/.annovar}.dm6_multianno.tab > ${FILE/.vcf/.annovar}.dm6_multianno.bed
+
+#Then intersect the polarized VCF with the annotated BED an edit it to obtain the annotated VCF:
+grep '^#' $FILE > ${FILE/.vcf/.annovar}.dm6_multianno.vcf
+bedtools intersect -a $FILE -b ${FILE/.vcf/.annovar}.dm6_multianno.bed -wb | awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s;%s\n"),$1,$2-1,$2,$3,$4,$5,$6,$7,$8,$NF}' | bedtools intersect -a stdin -b $FILE -wb | cut -f1,3-9,18- >> ${FILE/.vcf/.annovar}.dm6_multianno.vcf
+
+```
+
+###INDIVIDUALS
+```{R, engine='bash'}
+
+module load annovar/4.19
+
+cd /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/
+FILE=Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.vcf #Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.vcf
+#Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.vcf
+
+table_annovar.pl $FILE /share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/ancestral_dm6 -vcfinput --outfile ${FILE/.vcf/.annovar} -buildver dm6 --protocol refGene --operation g
+
+```
