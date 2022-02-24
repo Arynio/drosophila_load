@@ -1318,7 +1318,7 @@ cat <(grep '#' $FILE) ${FILE/.vcf/.consistent.vcf} ${FILE/.vcf/.inconsistent.pol
 
 #Polarize the AA-filled VCF based on the new INFO/AA column. Alleles will be switched whenever the ancestral allele matches the alternative one, and genotypes will be properly recoded as well. The following code was originally provided by Pierre Lindenbaum and modified by José Luis Castro.
 
-FILE=Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.final_snp_set.aafilled.vcf #Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.final_snp_set.aafilled.vcf #Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.final_snp_set.aafilled.vcf
+FILE=/share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.final_snp_set.aafilled.vcf #/share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.final_snp_set.aafilled.vcf #/share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.final_snp_set.aafilled.vcf
 
 java -jar /DATA/APPS/jvarkit/dist/vcffilterjdk.jar -e 'if(variant.getNAlleles()!=2 || !variant.hasAttribute("AA")) return true; 
 final String aa = variant.getAttributeAsString("AA",""); 
