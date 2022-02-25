@@ -138,3 +138,52 @@ FILE=Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.final_snp_set.polarized
 table_annovar.pl $FILE /share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/ancestral_dm6 -vcfinput --outfile ${FILE/.vcf/.annovar} -buildver dm6 --protocol refGene --operation g
 
 ```
+
+#2. Carry out SIFT annotation:
+##Install the programme and download the database.
+```{R, engine='bash'}
+
+#I'm following instructions from https://sift.bii.a-star.edu.sg/sift4g/Commandline.html
+
+mkdir -p /share/rdata/ramon.pouso/reference/indexed_reference/sift_database/
+cd /share/rdata/ramon.pouso/reference/indexed_reference/sift_database/
+
+#First download and uncompress the database.
+wget https://sift.bii.a-star.edu.sg/sift4g/public//Drosophila_melanogaster/BDGP6.83.zip --no-check-certificate
+jar xf BDGP6.83.zip #The unzipped folder will have three files for each chromosome: a compressed chromosome file (.gz); a regions file (.regions); a chromosome statistics file (.txt).
+
+#Then download the jar file to execute the programme.
+wget -P /share/rdata/ramon.pouso https://github.com/pauline-ng/SIFT4G_Annotator/raw/master/SIFT4G_Annotator.jar
+
+```
+
+##Run the programme:
+###sift4g_annotation.sh
+```{R, engine='bash'}
+
+#Run this from the proper directory as follows: qsub -cwd -l h=compute-0-9 /share/rdata/ramon.pouso/Scripts/sift4g_annotation.sh VCF (where VCF is the target VCF)
+
+java -jar /share/rdata/ramon.pouso/sift4g/SIFT4G_Annotator_v2.4.jar –c -t -i ${CURR_DIR}/$1 -d /share/rdata/ramon.pouso/reference/indexed_reference/sift_database/BDGP6.83/ -r ${CURR_DIR}
+
+#Note: do not paste this code in the terminal and save it as a script. Some invisible characters will break SIFT and throw a $DISPLAY issue. Instead, write it directly in the terminal using nano or some other editor, and then save it as sift4g_annotation.sh
+
+```
+
+###Comments:
+```{R, engine='bash'}
+
+#Launch it as follows for each VCF:
+##POOLS, gens0-40:
+cd /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/
+qsub -cwd -l h=compute-0-9 /share/rdata/ramon.pouso/Scripts/sift4g_annotation.sh crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.polarized.annovar.dm6_multianno.vcf
+##POOLS, gen140:
+cd /share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/masked/
+qsub -cwd -l h=compute-0-9 /share/rdata/ramon.pouso/Scripts/sift4g_annotation.sh crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.polarized.annovar.dm6_multianno.vcf
+##INDIVIDUALS, autosomic:
+cd /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/
+qsub -cwd -l h=compute-0-9 /share/rdata/ramon.pouso/Scripts/sift4g_annotation.sh Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.annovar.dm6_multianno.vcf
+##INDIVIDUALS, Xchr:
+cd /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/
+qsub -cwd -l h=compute-0-9 /share/rdata/ramon.pouso/Scripts/sift4g_annotation.sh Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.annovar.dm6_multianno.vcf
+
+```
