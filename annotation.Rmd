@@ -5,7 +5,7 @@ output: html_document
 
 #1. Carry out general annotation with ANNOVAR:
 ##Build the drosophila database.
-###Good version (changes codes in the UCSC database).
+###Good complete version (changes codes in the UCSC database).
 ```{R, engine='bash'}
 
 mkdir -p /share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/ancestral_dm6/
@@ -37,6 +37,39 @@ scp -p /share/rdata/ramon.pouso/reference/indexed_reference/ancestral_dmel-all-c
 #Next, use annovar to build the gene database:
 module load annovar/4.19
 retrieve_seq_from_fasta.pl dm6_refGene.txt -seqfile dm6_seq/dm6_ancestral_dmel-all-chromosome-r6.14.fa -format refGene -outfile dm6_refGeneMrna.fa
+
+```
+
+###Good non-redundant version (changes codes in the UCSC database).
+```{R, engine='bash'}
+
+#This version is a clone of the good complete version from which we'll remove all isoforms except for the longest one. Hence this is the "non-redundant" or "main isoforms" version of the annovar database, which we'll use to simplify the subsequent PROVEAN annotation.
+
+#First, download the .gtf gene database from the UCSC:
+cd /share/rdata/ramon.pouso/reference/indexed_reference/
+wget https://hgdownload.soe.ucsc.edu/goldenPath/dm6/bigZips/genes/dm6.refGene.gtf.gz
+gunzip dm6.refGene.gtf.gz
+
+#Then extract the list of transcripts, calculate their size, and keep the largest one for each chromosome.
+awk -F"\t|gene_id |; transcript_id |;  gene_name " '($1 == "chr2L" || $1 == "chr2R" || $1 == "chr3L" || $1 == "chr3R" || $1 == "chr4" || $1 == "chrX") && $3=="transcript" {printf ("%s\t%s\t%s\t%s\n"),$1,$5-$4,$10,$11}' dm6.refGene.gtf | sed 's/"//g' | sort -k1,1 -k3,3 -k2,2nr | sort -k3,3 -u | sort -k1,1 -k3,3 > dm6nr.refGene.txt
+grep -Ff <(cut -f4 dm6nr.refGene.txt) dm6.refGene.gtf > dm6nr.refGene.gtf
+
+#Next, clone the previous ancestral database and rename it and some of its files to include the code "nr" (non-redundant):
+cd /share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/
+scp -pr ancestral_dm6 nr_ancestral_dm6
+cd nr_ancestral_dm6
+mv dm6_seq dm6nr_seq
+mv dm6nr_seq/dm6_ancestral_dmel-all-chromosome-r6.14.fa dm6nr_seq/dm6nr_ancestral_dmel-all-chromosome-r6.14.fa
+mv dm6.chromAlias.txt dm6nr.chromAlias.txt
+rm dm6nr_refGeneMrna.fa
+
+#Then subset the dm6 annovar database so that only main isoforms are kept, and remove the original database.
+grep -Ff <(cut -f4 /share/rdata/ramon.pouso/reference/indexed_reference/dm6nr.refGene.txt) dm6_refGene.txt > dm6nr_refGene.txt
+rm dm6_refGene.txt
+
+#Next, use annovar to build the gene database:
+module load annovar/4.19
+retrieve_seq_from_fasta.pl dm6nr_refGene.txt -seqfile dm6nr_seq/dm6nr_ancestral_dmel-all-chromosome-r6.14.fa -format refGene -outfile dm6nr_refGeneMrna.fa
 
 ```
 
@@ -92,7 +125,8 @@ retrieve_seq_from_fasta.pl dm6_refGene.txt -seqfile dm6_seq/dm6_ancestral_dmel-a
 ```
 
 ##Annotate the VCFs.
-###POOLS:
+###Complete version.
+####POOLS:
 ```{R, engine='bash'}
 
 module load annovar/4.19
@@ -126,7 +160,7 @@ bedtools intersect -a $FILE -b ${FILE/.vcf/.annovar}.dm6_multianno.bed -wb | awk
 
 ```
 
-###INDIVIDUALS
+####INDIVIDUALS
 ```{R, engine='bash'}
 
 module load annovar/4.19
@@ -139,9 +173,64 @@ table_annovar.pl $FILE /share/rdata/ramon.pouso/reference/indexed_reference/anno
 
 ```
 
+###Non-redundant version.
+####POOLS:
+```{R, engine='bash'}
+
+module load annovar/4.19
+module load gcc/7.2.0 
+module add gcc/7.2.0 
+
+#Define which VCF to work with, and its appropriate path:
+GEN="gen140" #"gen0-40" #gen140
+if [ $GEN == "gen0-40" ]
+  then
+  cd /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/
+elif [ $GEN == "gen140" ]
+  then
+  cd /share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/masked/
+fi
+FILE=crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.polarized.vcf
+
+#First convert from VCF to table (annovar can't deal with the particular format of the pool. VCFs). This was already created in the complete version, so there is no need to run it again.
+#convert2annovar.pl -format vcf4old --outfile ${FILE/.vcf/.annovar} $FILE
+
+#Next, annotate the table. The resulting file is automatically labelled as .vcf by the programme, even though it really isn't a VCF.
+table_annovar.pl ${FILE/.vcf/.annovar} /share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/nr_ancestral_dm6 -vcfinput --outfile ${FILE/.vcf/.nr_annovar} -buildver dm6nr --protocol refGene --operation g
+
+#Convert the annotated table to a .bed.
+mv ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.vcf ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.tab
+awk -F"\t|;ANNOVAR_DATE" '{printf ("%s\t%s\t%s\tANNOVAR_DATE%s\n"),$1,$2-1,$3,$9}' ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.tab > ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.bed
+
+#Then intersect the polarized VCF with the annotated BED an edit it to obtain the annotated VCF:
+grep '^#' $FILE > ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.vcf
+bedtools intersect -a $FILE -b ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.bed -wb | awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s;%s\n"),$1,$2-1,$2,$3,$4,$5,$6,$7,$8,$NF}' | bedtools intersect -a stdin -b $FILE -wb | cut -f1,3-9,18- >> ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.vcf
+
+```
+
+####INDIVIDUALS
+```{R, engine='bash'}
+
+module load annovar/4.19
+
+cd /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/
+FILE=Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.vcf #Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.vcf
+#Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.vcf
+
+table_annovar.pl $FILE /share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/nr_ancestral_dm6 -vcfinput --outfile ${FILE/.vcf/.nr_annovar} -buildver dm6nr --protocol refGene --operation g
+
+```
+
+
 #2. Carry out SIFT annotation:
 ##Install the programme and download the database.
 ```{R, engine='bash'}
+
+!!!GENERATE NEW DB FOR THE ANCESTRAL GENOME USING:
+
+https://sift.bii.a-star.edu.sg/sift4g/SIFT4G_codes.html
+https://github.com/pauline-ng/SIFT4G_Create_Genomic_DB#DBfromGTF
+
 
 #I'm following instructions from https://sift.bii.a-star.edu.sg/sift4g/Commandline.html
 
@@ -154,6 +243,113 @@ jar xf BDGP6.83.zip #The unzipped folder will have three files for each chromoso
 
 #Then download the jar file to execute the programme.
 wget -P /share/rdata/ramon.pouso https://github.com/pauline-ng/SIFT4G_Annotator/raw/master/SIFT4G_Annotator.jar
+
+```
+
+##Generate custom database.
+###Test:
+```{R, engine='bash'}
+
+#I'm following instructions from: https://github.com/pauline-ng/SIFT4G_Create_Genomic_DB#DBfromGTF
+
+#First, install sift4g:
+cd /mnt/lustre/scratch/home/uvi/bg/dkr
+mkdir sift4g_annotation
+cd sift4g_annotation
+git clone --recursive https://github.com/rvaser/sift4g.git sift4g
+cd sift4g/
+make
+
+#Next download the UniProt ref90 protein database:
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/sift_prot_db
+wget https://ftp.uniprot.org/pub/databases/uniprot/uniref/uniref90/uniref90.fasta.gz
+gunzip uniref90.fasta.gz
+
+#Next, copy the database-builder scripts:
+git clone https://github.com/pauline-ng/SIFT4G_Create_Genomic_DB.git scripts_to_build_SIFT_db
+cd scripts_to_build_SIFT_db
+
+cd test_files/
+nano homo_sapiens-test.txt #edit each of the following fields following instructions from https://github.com/pauline-ng/SIFT4G_Create_Genomic_DB#configFile:
+SIFT4G_PATH=/mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/sift4g/bin/sift4g
+PROTEIN_DB=/mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/sift_prot_db/uniref90.fasta
+
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/scripts_to_build_SIFT_db
+perl make-SIFT-db-all.pl -config test_files/homo_sapiens-test.txt #it works!
+
+```
+
+###Ancestral drosophila database:
+```{R, engine='bash'}
+
+#I'm following instructions from: https://github.com/pauline-ng/SIFT4G_Create_Genomic_DB#DBfromGTF
+
+#First, install sift4g:
+cd /mnt/lustre/scratch/home/uvi/bg/dkr
+mkdir sift4g_annotation
+cd sift4g_annotation
+git clone --recursive https://github.com/rvaser/sift4g.git sift4g
+cd sift4g/
+make
+
+#Next download the UniProt ref90 protein database:
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/sift_prot_db
+wget https://ftp.uniprot.org/pub/databases/uniprot/uniref/uniref90/uniref90.fasta.gz
+gunzip uniref90.fasta.gz
+
+#Next, copy the database-builder scripts:
+git clone https://github.com/pauline-ng/SIFT4G_Create_Genomic_DB.git scripts_to_build_SIFT_db
+cd scripts_to_build_SIFT_db/test_files/
+
+#Edit the target species config file:
+scp homo_sapiens-test.txt nr_ancestral_dm6.config.txt
+nano nr_ancestral_dm6.config.txt #edit each of the following fields following instructions from https://github.com/pauline-ng/SIFT4G_Create_Genomic_DB#configFile:
+PARENT_DIR=/mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/scripts_to_build_SIFT_db/test_files/nr_ancestral_dm6
+ORG=ancestral_drosophila_melanogaster
+ORG_VERSION=nr_ancestral_dm6
+SIFT4G_PATH=/mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/sift4g/bin/sift4g
+PROTEIN_DB=/mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/sift_prot_db/uniref90.fasta
+MITO_GENETIC_CODE_TABLE=5
+MITO_GENETIC_CODE_TABLENAME=Invertebrate Mitochondrial
+
+#Create directory for the target species, and copy the target species files (reference fasta and annotation file):
+mkdir nr_ancestral_dm6
+cd nr_ancestral_dm6
+#Put genomic fasta file in chr-src, and split it by chromosome:
+mkdir chr-src
+scp -p ramon.pouso@rua2.uvigo.es://share/rdata/ramon.pouso/reference/indexed_reference/ancestral_dmel-all-chromosome-r6.14.fa.gz chr-src/
+cd chr-src/
+gunzip ancestral_dmel-all-chromosome-r6.14.fa.gz
+awk 'BEGIN {O="";} /^>/ { O=sprintf("%s.fa",substr($0,2));} {if(O!="") print >> O;}' ancestral_dmel-all-chromosome-r6.14.fa
+rm ancestral_dmel-all-chromosome-r6.14.fa
+#Put gene annotation file in gene-annotation-src:
+cd ..
+mkdir gene-annotation-src
+scp -p ramon.pouso@rua2.uvigo.es://share/rdata/ramon.pouso/reference/indexed_reference/dm6nr.refGene.gtf gene-annotation-src/
+gunzip gene-annotation-src/dm6nr.refGene.gtf.gz
+awk -F"\t" '{OFS = FS} { gsub(/chr/,"", $1); print }' gene-annotation-src/dm6nr.refGene.gtf | gzip > gene-annotation-src/dm6nr.refGene.gtf.gz #remove the "chr" part from the chromosome names in the .gtf file, since it's using a different nomenclature than the .fa file and it was crashing the programme.
+rm gene-annotation-src/dm6nr.refGene.gtf
+
+#Finally, build the database using the following command:
+sbatch make-SIFT-db-all.sh #But first store in make-SIFT-db-all.sh the following lines:
+
+#!/bin/bash
+#SBATCH -p thinnodes
+#SBATCH -n 2
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=24
+#SBATCH -J make-SIFT-db-all
+#SBATCH -o make-SIFT-db-all_%A.out
+#SBATCH -t 36:00:00 # execution time
+#SBATCH --mail-type=TIME_LIMIT_80
+#SBATCH --mail-user=dkmanruiz@gmail.com
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/scripts_to_build_SIFT_db
+perl make-SIFT-db-all.pl -config /mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/scripts_to_build_SIFT_db/test_files/nr_ancestral_dm6.config.txt
+
+
+#I encountered this bug: https://github.com/rvaser/sift4g/issues/10 and edited the code as suggested here. However I kept running into the same problem until I realised that the programme doesn't remove the all_prot.fasta file, so it keeps appending the wrong sequences.
+
+#If it crashes again, download https://github.com/pauline-ng/SIFT4G_Create_Genomic_DB/files/3877234/make-SIFT-db-starting_from_SIFT4G.pl.txt and continue from there.
 
 ```
 
@@ -185,5 +381,739 @@ qsub -cwd -l h=compute-0-9 /share/rdata/ramon.pouso/Scripts/sift4g_annotation.sh
 ##INDIVIDUALS, Xchr:
 cd /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/
 qsub -cwd -l h=compute-0-9 /share/rdata/ramon.pouso/Scripts/sift4g_annotation.sh Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.annovar.dm6_multianno.vcf
+
+```
+
+#3. Carry out PROVEAN annotation.
+##Prepare necessary files to build the database.
+###Prepare list of genes with missense mutations.
+```{bash}
+
+#This and the next step will be performed in the cluster, but the rest in CESGA.
+cd /share/rdata/ramon.pouso/provean
+
+rm pools_individuals_nonsynonymous_vcf.txt
+FILES=("/share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.polarized.nr_annovar.dm6nr_multianno.vcf" "/share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/masked/crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.polarized.nr_annovar.dm6nr_multianno.vcf" "/share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.nr_annovar.dm6nr_multianno.vcf" "/share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.nr_annovar.dm6nr_multianno.vcf")
+
+#Extract list of sites which are annotated as exonic and nonsynonymous:
+for vcf in ${FILES[@]}
+  do
+  echo $vcf
+  grep -e 'refGene=exonic;.*nonsynonymous' $vcf >> pools_individuals_nonsynonymous_vcf.txt
+  done
+
+#Generate list with coordinates, gene and transcript names, and aminoacid changes:
+awk -F"\t|;AAChange.refGene=|;ALLELE_END" '{printf ("%s\t%s\t%s\n", $1,$2,$9)}' pools_individuals_nonsynonymous_vcf.txt | awk -F"\t|:|," '{printf ("%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$7)}' | awk -F"\t" '{OFS = FS} { gsub(/p\./,"", $5); print }' | grep -v "RNA" | sort -k1,1 -k2,2n | uniq > pools_individuals_nonsynonymous_gene_names.txt
+
+#Sanity checks:
+cut -f3 pools_individuals_nonsynonymous_gene_names.txt | sort -u | wc -l #10612 genes
+cut -f4 pools_individuals_nonsynonymous_gene_names.txt | sort -u | wc -l #10612 transcripts
+#If the number of unique gene names and transcript names is the same, the script worked. In a previous version both numbers were different, which allowed me to discover that some genes with parenthesis in their names were introducing bugs. I modified the code to the current version, and now everything checks.
+
+scp pools_individuals_nonsynonymous_gene_names.txt uvibgdkr@ft2.cesga.es://mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/
+
+```
+
+###Prepare annotation and fasta files.
+```{bash}
+
+cd /share/rdata/ramon.pouso/reference/indexed_reference/
+
+#Upload the non-redundant version of the .gtf file obtained in the ANNOVAR section:
+scp dm6nr.refGene.gtf uvibgdkr@ft2.cesga.es://mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/
+
+#Upload the ancestral version of the .fa file obtained in the polarisation script:
+scp ancestral_dmel-all-chromosome-r6.14.fa uvibgdkr@ft2.cesga.es://mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/
+
+```
+
+##Build Provean database.
+###Generate for each gene a file with its aminoacid changes (in the format required by Provean).
+```{bash}
+
+#This analysis will be run from here on in CESGA, in the following path:
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/
+
+#Extract all variants from each gene and store them in variant files.
+mkdir -p genes_variants
+GENES=$(cat pools_individuals_nonsynonymous_gene_names.txt | cut -f 3 | sort -u)
+for gen in ${GENES[@]}
+  do
+  echo "$gen"
+  awk -v gene_name=$gen '$3 == gene_name {print $5}' pools_individuals_nonsynonymous_gene_names.txt > genes_variants/"$gen".var
+  done
+  
+#Replace parentheses with low dashes, since provean.sh isn't able to parse files with brackets in their name. Also remove square brackets.
+cd genes_variants
+GENES=$(ls *\(*)
+for old_name in ${GENES[@]}
+  do
+  echo "$old_name"
+  new_name=$(echo "$old_name" | sed -e 's/(/_/g;s/)/_/g;s/\[//g;s/\]//g')
+  echo "$new_name"
+  mv "$old_name" "$new_name"
+  done
+
+```
+
+###Generate for each gene a fasta file with its protein sequence.
+####Retrieve the whole nucleotide sequence.
+```{bash}
+
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation
+
+#First generate a more readable version of the non-redundant annotation file, which keeps only necessary data, and transforms coordinates from 1-based (GTF format) to 0-based (BED format):
+awk -F'\t|gene_id \"|"; transcript_id |; exon_id "|"; gene_name' '($1 == "chr2L" || $1 == "chr2R" || $1 == "chr3L" || $1 == "chr3R" || $1 == "chr4" || $1 == "chrX") && $3=="CDS" {printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\n"),$1,$4-1,$5,$7,$8,$10,$12}' dm6nr.refGene.gtf > dm6nr.refGene.txt
+
+#Then cross it with the list of genes with nonsynonymous variants to obtain coordinates for all CDS from all genes that will be analysed with Provean. I tried to do it faster using grep -Fwf but some genes have special characters (such as "-") which are not considered part of a word, so it introduces some mistakes. SO it's best to use this loop instead:
+GENES=$(cat pools_individuals_nonsynonymous_gene_names.txt | cut -f 3 | sort -u)
+COUNTER=0
+rm pools_individuals_nonsynonymous.cds_list.dm6nr.refGene.txt
+for gen in ${GENES[@]}
+  do
+  #echo "${gen}"
+  awk -v gene_name=$gen '$6 == gene_name' dm6nr.refGene.txt >> pools_individuals_nonsynonymous.cds_list.dm6nr.refGene.txt
+  ((COUNTER++))
+  if [ $(( $COUNTER % 100 )) == 0 ]
+    then
+    echo "processed $COUNTER genes out of $(echo "$GENES" | wc -l)"
+  fi
+  done
+awk -F"\t" '{OFS = FS} { gsub(/chr/,"", $1); print }' pools_individuals_nonsynonymous.cds_list.dm6nr.refGene.txt > pools_individuals_nonsynonymous.cds_list.dm6nr.refGene.bed #Remove the "chr" from the chromosome names to convert them into the same format that the fasta uses.
+
+  ##Sanity checks:
+  cut -f6 pools_individuals_nonsynonymous.cds_list.dm6nr.refGene.bed | uniq | wc -l #10502 genes instead of the 10612 found in pools_individuals_nonsynonymous_gene_names.txt because some of the genes in the annovar database are not included in the UCSC .gtf file. 
+  comm -3 <(cut -f3 pools_individuals_nonsynonymous_gene_names.txt | sort -u) <(cut -f6 pools_individuals_nonsynonymous.cds_list.dm6nr.refGene.bed | sort -u) | wc -l #110, which is the correct result of 10612-10502. 
+  comm -3 <(cut -f3 pools_individuals_nonsynonymous_gene_names.txt | sort -u) <(cut -f6 pools_individuals_nonsynonymous.cds_list.dm6nr.refGene.bed | sort -u) | less -S #All results are displayed in the first column, which means that all missing entries are missing in the second file, and none from the second file are missing in the first one.
+
+#Retrieve reference sequences for all CDS (from the ancestral fasta to account for polarisation).
+module load bedtools/2.30.0 
+bedtools getfasta -fi ancestral_dmel-all-chromosome-r6.14.fa -bed pools_individuals_nonsynonymous.cds_list.dm6nr.refGene.bed -fo pools_individuals_nonsynonymous.cds_sequence.fa
+
+  ##Sanity checks:
+  grep -v '>' pools_individuals_nonsynonymous.cds_sequence.fa | wc -l #43675, which is the same number of CDS (lines) in the file pools_individuals_nonsynonymous.cds_list.dm6nr.refGene.bed.
+
+#Paste each CDS' sequence with the rest of the information.
+paste pools_individuals_nonsynonymous.cds_list.dm6nr.refGene.bed <(grep -v '>' pools_individuals_nonsynonymous.cds_sequence.fa) > pools_individuals_nonsynonymous.cds_list_and_sequence.dm6nr.refGene.bed
+
+  ##Sanity checks:
+  awk '{printf ("%s\t%s\n"),$3-$2,length($8)}' pools_individuals_nonsynonymous.cds_list_and_sequence.dm6nr.refGene.bed | awk '$1==$2' | wc -l #43675, which means that all retrieved sequences have the correct length (the same as the difference between their start and their end points).
+
+#Fuse all exons from each gene and store them in a file together with the gene name and the strand information.
+GENES=$(cat pools_individuals_nonsynonymous.cds_list_and_sequence.dm6nr.refGene.bed | cut -f 6 | sort -u)
+TOTAL=$(echo "$GENES" | wc -l)
+COUNTER=0
+rm pools_individuals_nonsynonymous.cds_list_and_sequence_combined.dm6nr.refGene.bed
+for gen in ${GENES[@]}
+  do
+  #echo "${gen}"
+  STRAND=$(awk -F"\t" -v gen=$gen '$6 == gen' pools_individuals_nonsynonymous.cds_list_and_sequence.dm6nr.refGene.bed | shuf -n1 | cut -f 4)
+  CODING_SEQUENCE=$(awk -F"\t" -v gen=$gen '$6 == gen {print $8}' pools_individuals_nonsynonymous.cds_list_and_sequence.dm6nr.refGene.bed | tr -d '\n')
+  echo -e "$gen\t$STRAND\t$CODING_SEQUENCE" >> pools_individuals_nonsynonymous.cds_list_and_sequence_combined.dm6nr.refGene.bed
+  ((COUNTER++))
+  if [ $(( $COUNTER % 50 )) == 0 ]
+    then
+    echo "processed $COUNTER genes out of $(echo "$GENES" | wc -l)"
+  fi
+  done
+
+#Translate the exons to proteins using an external website and store each protein in a fasta file:
+mkdir -p genes_fasta
+TOTAL=$(cat pools_individuals_nonsynonymous.cds_list_and_sequence_combined.dm6nr.refGene.bed | wc -l)
+COUNTER=0
+while read -r GENE STRAND CODING_SEQUENCE; do
+  #GENE=$(echo "$entry" | cut -f 1)
+  echo $GENE
+  #STRAND=$(echo "$entry" | cut -f 2)
+  #echo $STRAND
+  #CODING_SEQUENCE=$(echo "$entry" | cut -f 3)
+  #echo $CODING_SEQUENCE
+  if [ $STRAND == "+" ]
+    then
+    curl -s -d "dna_sequence=$CODING_SEQUENCE&output_format=fasta" -A "${GENE}" https://web.expasy.org/cgi-bin/translate/dna2aa.cgi | awk '/:5'\''3'\'' Frame 1$/,/:5'\''3'\'' Frame 2$/' | head -n-1 | sed -r '/^\s*$/d' | sed 's/-/X/g' > genes_fasta/"$GENE".fa #sends the DNA sequence to the expasy website, then selects the lines for the proper strand (here: +) between the header for Frame 1 and the header for Frame 2, then removes the header for Frame 2, then removes any empty line that may exist, then replaces any existing hyphen by an X (unknown aminoacid) so that Provean doesn't crash.
+  elif [ $STRAND == "-" ]
+    then
+    curl -s -d "dna_sequence=$CODING_SEQUENCE&output_format=fasta" -A "${GENE}" https://web.expasy.org/cgi-bin/translate/dna2aa.cgi | awk '/:3'\''5'\'' Frame 1$/,/:3'\''5'\'' Frame 2$/' | head -n-1 | sed -r '/^\s*$/d' | sed 's/-/X/g' > genes_fasta/"$GENE".fa #sends the DNA sequence to the expasy website, then selects the lines for the proper strand (here: -) between the header for Frame 1 and the header for Frame 2, then removes the header for Frame 2, then removes any empty line that may exist, then replaces any existing hyphen by an X (unknown aminoacid) so that Provean doesn't crash.
+  fi
+  ((COUNTER++))
+  if [ $(( $COUNTER % 2 )) == 0 ]
+    then
+    echo "processed $COUNTER genes out of $TOTAL"
+  fi
+  sleep 2
+  done < pools_individuals_nonsynonymous.cds_list_and_sequence_combined.dm6nr.refGene.bed
+
+```
+
+####Convert to aminoacidic sequence.
+#####nucleotide_to_aminoacid.sh
+```{bash}
+
+#!/bin/bash
+#SBATCH -p thinnodes
+#SBATCH -J nucleotide_to_aminoacid
+#SBATCH -o nucleotide_to_aminoacid_%A.out
+#SBATCH -t 00:05:00              # Run time (hh:mm:ss)
+#SBATCH -c 6
+#SBATCH --mail-type=TIME_LIMIT_80
+#SBATCH --mail-user=dkmanruiz@gmail.com
+
+#Translate the exons to proteins using an external website and store each protein in a fasta file:
+
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation
+
+TOTAL=$(cat $1 | wc -l)
+COUNTER=0
+while read -r GENE STRAND CODING_SEQUENCE; do
+  #GENE=$(echo "$entry" | cut -f 1)
+  echo $GENE
+  #STRAND=$(echo "$entry" | cut -f 2)
+  #echo $STRAND
+  #CODING_SEQUENCE=$(echo "$entry" | cut -f 3)
+  #echo $CODING_SEQUENCE
+  if [ $STRAND == "+" ]
+    then
+    curl -s -d "dna_sequence=$CODING_SEQUENCE&output_format=fasta" -A "${GENE}" https://web.expasy.org/cgi-bin/translate/dna2aa.cgi | awk '/:5'\''3'\'' Frame 1$/,/:5'\''3'\'' Frame 2$/' | head -n-1 | sed -r '/^\s*$/d' | sed 's/-/X/g' > genes_fasta/"$GENE".fa #sends the DNA sequence to the expasy website, then selects the lines for the proper strand (here: +) between the header for Frame 1 and the header for Frame 2, then removes the header for Frame 2, then removes any empty line that may exist, then replaces any existing hyphen by an X (unknown aminoacid) so that Provean doesn't crash.
+  elif [ $STRAND == "-" ]
+    then
+    curl -s -d "dna_sequence=$CODING_SEQUENCE&output_format=fasta" -A "${GENE}" https://web.expasy.org/cgi-bin/translate/dna2aa.cgi | awk '/:3'\''5'\'' Frame 1$/,/:3'\''5'\'' Frame 2$/' | head -n-1 | sed -r '/^\s*$/d' | sed 's/-/X/g' > genes_fasta/"$GENE".fa #sends the DNA sequence to the expasy website, then selects the lines for the proper strand (here: -) between the header for Frame 1 and the header for Frame 2, then removes the header for Frame 2, then removes any empty line that may exist, then replaces any existing hyphen by an X (unknown aminoacid) so that Provean doesn't crash.
+  fi
+  ((COUNTER++))
+  if [ $(( $COUNTER % 50 )) == 0 ]
+    then
+    echo "processed $COUNTER genes out of $TOTAL"
+  fi
+  sleep 2
+  done < $1
+
+```
+
+#####Send the job:
+```{bash}
+
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation
+
+PARALLEL=4
+FILENAME=pools_individuals_nonsynonymous.cds_list_and_sequence_combined.dm6nr.refGene.bed
+TOTAL=$(wc -l < $FILENAME)
+BLOCK_SIZE=$(echo "scale=0; $TOTAL/$PARALLEL" | bc)
+for ((i=1; i<PARALLEL; i++))
+  do
+  START=$((((i-1))*BLOCK_SIZE+1))
+  echo $START
+  END=$((BLOCK_SIZE*i))
+  echo $END
+  sed -n "${START},${END}p" $FILENAME > ${FILENAME/.bed/.chunk_${i}.bed}
+  done
+START=$((((i-1))*BLOCK_SIZE+1))
+echo $START
+echo $TOTAL
+sed -n "${START},${TOTAL}p" $FILENAME > ${FILENAME/.bed/.chunk_${i}.bed}
+
+for ((i=1; i<=PARALLEL; i++))
+  do
+  sbatch -J nucleotide_to_aminoacid -o nucleotide_to_aminoacid.chunk_${i}.%A.out /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/nucleotide_to_aminoacid.sh ${FILENAME/.bed/.chunk_${i}.bed}
+  done
+
+```
+
+####Fix some gene names:
+```{bash}
+
+#Replace parentheses with low dashes, since provean.sh isn't able to parse files with brackets in their name. Also remove square brackets.
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/genes_fasta
+GENES=$(ls *\(*)
+for old_name in ${GENES[@]}
+  do
+  echo "$old_name"
+  new_name=$(echo "$old_name" | sed -e 's/(/_/g;s/)/_/g;s/\[//g;s/\]//g')
+  echo "$new_name"
+  mv "$old_name" "$new_name"
+  done
+
+```
+
+##Configure Provean:
+```{bash}
+
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/
+
+#Provean didn't work in CESGA because it was linked with the most recent versions of ncbi-blast+ and the blast nr databases, so I downloaded the required version of both:
+##blast+ v2.4.0:
+wget https://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/2.4.0/ncbi-blast-2.4.0+-x64-linux.tar.gz
+/mnt/lustre/scratch/home/uvi/bg/dkr
+tar xvzf ncbi-blast-2.4.0+-x64-linux.tar.gz
+##nr protein database v4
+cd ncbi-blast-2.4.0+/
+wget https://ftp.ncbi.nlm.nih.gov/blast/db/v4/nr_v4* /mnt/lustre/scratch/home/uvi/bg/dkr/ncbi-blast-2.4.0+
+tar xvzf nr_v4*
+
+#Next, I copied the executable provean files to my local folder:
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation
+scp -p /mnt/netapp1/Optcesga_FT2_RHEL7/2020/software/Compiler/gcccore/system/provean/1.1.5/bin/provean ./
+scp -p /mnt/netapp1/Optcesga_FT2_RHEL7/2020/software/Compiler/gcccore/system/provean/1.1.5/bin/provean.sh ./ 
+nano provean.sh #Then I edited the configuration paths in the provean.sh files to match the following:
+####################
+# CONFIGURATION
+####################
+# Specify the path to database and program
+#
+BLAST_DB="/mnt/lustre/scratch/home/uvi/bg/dkr/ncbi-blast-2.4.0+/blastdb_v4nr/nr"
+PSIBLAST="/mnt/lustre/scratch/home/uvi/bg/dkr/ncbi-blast-2.4.0+/bin/psiblast"
+CD_HIT="/opt/cesga/2020/software/Compiler/gcccore/system/cd-hit/4.8.1/bin/cd-hit"
+BLASTDBCMD="/mnt/lustre/scratch/home/uvi/bg/dkr/ncbi-blast-2.4.0+/bin/blastdbcmd"
+# END CONFIGURATION
+####################
+
+```
+
+##Run Provean.
+###Prepare the list of genes and the output folder:
+```{bash}
+
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation
+ls genes_fasta/*.fa | awk -F"genes_fasta/|.fa" '{print $2}' > gene_list.txt
+mkdir -p provean_output
+mkdir -p genes_support
+
+```
+
+###Parallel runs (N=20) of all genes:
+####Choose the partition number:
+```{bash}
+
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation
+PARALLEL=20 #define the desired value, and the script will do the rest
+
+FILENAME=gene_list.txt
+TOTAL=$(wc -l < $FILENAME)
+BLOCK_SIZE=$(echo "scale=0; $TOTAL/$PARALLEL" | bc)
+for ((i=1; i<PARALLEL; i++))
+  do
+  START=$((((i-1))*BLOCK_SIZE+1))
+  echo $START
+  END=$((BLOCK_SIZE*i))
+  echo $END
+  sed -n "${START},${END}p" $FILENAME > ${FILENAME/.txt/.chunk_${i}.txt}
+  done
+START=$((((i-1))*BLOCK_SIZE+1))
+echo $START
+echo $TOTAL
+sed -n "${START},${TOTAL}p" $FILENAME > ${FILENAME/.txt/.chunk_${i}.txt}
+
+```
+
+####parallel_provean.sh
+```{bash}
+
+#!/bin/bash
+#SBATCH -p fatnode
+#SBATCH -J provean_parallel
+#SBATCH -o provean_parallel.%A.chunk_%a.out
+#SBATCH -t 100:00:00              # Run time (hh:mm:ss)
+#SBATCH -c 10
+#SBATCH --mem-per-cpu=10GB
+#SBATCH --mail-type=TIME_LIMIT_80
+#SBATCH --mail-user=dkmanruiz@gmail.com
+
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation
+module load gcccore/system provean/1.1.5
+
+# Retrieve files:
+FILENAME=gene_list.txt
+echo "Running provean; chunk number" ${SLURM_ARRAY_TASK_ID}
+TOTAL=$(wc -l < ${FILENAME/.txt/.chunk_${SLURM_ARRAY_TASK_ID}.txt})
+COUNTER=0
+
+while read -r GENE; do
+  echo "Processing gene $GENE"
+  /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/provean.sh --num_threads $SLURM_CPUS_PER_TASK -q genes_fasta/"$GENE".fa -v genes_variants/"$GENE".var --save_supporting_set genes_support/"$GENE".sss > provean_output/"$GENE".provean
+  ((COUNTER++))
+  if [ $(( $COUNTER % 10 )) == 0 ]
+    then
+    echo "Processed $COUNTER genes out of $TOTAL"
+  fi
+  done < ${FILENAME/.txt/.chunk_${SLURM_ARRAY_TASK_ID}.txt}
+
+```
+
+####Send the array-job:
+```{bash}
+
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation
+PARALLEL=20 #define the desired value (same as in the "Choose the partition number" section):
+sbatch --array=1-$PARALLEL /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/parallel_provean.sh
+
+```
+
+####Retrieve unfinished genes and launch them:
+#####Choose chunks:
+```{bash}
+
+#Once all chunks of a particular job have finished, run this script to retrieve the list of genes which could not be processed before the queue finished, and group them in new input blocks:
+
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation
+JOB_ID=7948007 #Introduce the finished job id.
+START=1 #Introduce the first chunk.
+END=10 #Introduce the last chunk.
+PARALLEL=10 #define the number of new partitions.
+
+rm provean_parallel.$JOB_ID.chunk_${START}_to_chunk_${END}.remaining.out
+for ((i=START; i<=END; i++))
+  do
+  ls provean_parallel.$JOB_ID.chunk_${i}.out >> provean_parallel.$JOB_ID.chunk_${START}_to_chunk_${END}.remaining.out
+  done
+
+GENE_LISTS=$(cat provean_parallel.$JOB_ID.chunk_${START}_to_chunk_${END}.remaining.out)
+for gene_list in ${GENE_LISTS[@]}
+  do
+  if grep -q "TIME LIMIT" $gene_list; then
+    INTERRUPTED_GENE=$(grep "Processing gene" $gene_list | tail -n1 | cut -d' ' -f3)
+    echo "removing interrupted $INTERRUPTED_GENE.provean from $gene_list"
+    rm provean_output/$INTERRUPTED_GENE.provean
+    fi
+  done
+
+rm gene_list.chunk_${START}_to_chunk_${END}.remaining.txt
+for ((i=START; i<=END; i++))
+  do
+  while read -r GENE
+    do
+    if [ ! -f provean_output/${GENE}.provean ]
+      then
+      echo $GENE
+      echo ${GENE} >> gene_list.chunk_${START}_to_chunk_${END}.remaining.txt
+    fi
+    done < gene_list.chunk_${i}.txt
+  done
+
+FILENAME=gene_list.chunk_${START}_to_chunk_${END}.remaining.txt
+TOTAL=$(wc -l < $FILENAME)
+BLOCK_SIZE=$(echo "scale=0; $TOTAL/$PARALLEL" | bc)
+for ((i=1; i<PARALLEL; i++))
+  do
+  START=$((((i-1))*BLOCK_SIZE+1))
+  echo $START
+  END=$((BLOCK_SIZE*i))
+  echo $END
+  sed -n "${START},${END}p" $FILENAME > ${FILENAME/.txt/.chunk_${i}.txt}
+  done
+START=$((((i-1))*BLOCK_SIZE+1))
+echo $START
+echo $TOTAL
+sed -n "${START},${TOTAL}p" $FILENAME > ${FILENAME/.txt/.chunk_${i}.txt}
+
+```
+
+#####parallel_provean_remaining.sh
+```{bash}
+
+#!/bin/bash
+#SBATCH -p fatnode
+#SBATCH -J provean_parallel_remaining
+#SBATCH -o provean_parallel_remaining.%A.chunk_%a.out
+#SBATCH -t 100:00:00              # Run time (hh:mm:ss)
+#SBATCH -c 10
+#SBATCH --mem-per-cpu=10GB
+#SBATCH --mail-type=TIME_LIMIT_80
+#SBATCH --mail-user=dkmanruiz@gmail.com
+
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation
+module load gcccore/system provean/1.1.5
+
+#Retrieve files:
+FILENAME=$1
+echo "Running provean; chunk number" ${SLURM_ARRAY_TASK_ID}
+TOTAL=$(wc -l < ${FILENAME/.txt/.chunk_${SLURM_ARRAY_TASK_ID}.txt})
+COUNTER=0
+
+while read -r GENE; do
+  echo "Processing gene $GENE"
+  /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/provean.sh --num_threads $SLURM_CPUS_PER_TASK -q genes_fasta/"$GENE".fa -v genes_variants/"$GENE".var --save_supporting_set genes_support/"$GENE".sss > provean_output/"$GENE".provean
+  ((COUNTER++))
+  if [ $(( $COUNTER % 10 )) == 0 ]
+    then
+    echo "Processed $COUNTER genes out of $TOTAL"
+  fi
+  done < ${FILENAME/.txt/.chunk_${SLURM_ARRAY_TASK_ID}.txt}
+
+```
+
+#####Send the array-job:
+```{bash}
+
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation
+START=1 #Introduce the first chunk (same as in the "Choose chunks" section).
+END=10 #Introduce the last chunk (same as in the "Choose chunks" section).
+PARALLEL=10 #define the desired value:
+
+sbatch --array=1-$PARALLEL /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/parallel_provean_remaining.sh gene_list.chunk_1_to_chunk_10.remaining.txt
+
+```
+
+###Parallel runs (N=20) of last 25 genes per chunk:
+####Choose the partition number:
+```{bash}
+
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation
+PARALLEL=20 #define the desired value, and the script will do the rest
+
+rm gene_list.chunks_last25.txt
+for file in $(ls -v gene_list.chunk_*.txt)
+  do
+  tail -n25 $file | sort -r >> gene_list.chunks_last25.txt
+  done
+
+FILENAME=gene_list.chunks_last25.txt
+TOTAL=$(wc -l < $FILENAME)
+BLOCK_SIZE=$(echo "scale=0; $TOTAL/$PARALLEL" | bc)
+for ((i=1; i<PARALLEL; i++))
+  do
+  START=$((((i-1))*BLOCK_SIZE+1))
+  echo $START
+  END=$((BLOCK_SIZE*i))
+  echo $END
+  sed -n "${START},${END}p" $FILENAME > ${FILENAME/.txt/.chunk_${i}_last25.txt}
+  done
+START=$((((i-1))*BLOCK_SIZE+1))
+echo $START
+echo $TOTAL
+sed -n "${START},${TOTAL}p" $FILENAME > ${FILENAME/.txt/.chunk_${i}_last25.txt}
+
+```
+
+####parallel_provean_last25.sh
+```{bash}
+
+#!/bin/bash
+#SBATCH -p thinnodes
+#SBATCH -J provean_parallel
+#SBATCH -o provean_parallel.%A.chunk_%a.out
+#SBATCH -t 20:00:00              # Run time (hh:mm:ss)
+#SBATCH -c 8
+#SBATCH --mail-type=TIME_LIMIT_80
+#SBATCH --mail-user=dkmanruiz@gmail.com
+
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation
+module load gcccore/system provean/1.1.5
+
+# Retrieve files:
+FILENAME=gene_list.chunks_last25.txt
+echo "Running provean; chunk number" ${SLURM_ARRAY_TASK_ID}
+TOTAL=$(wc -l < ${FILENAME/.txt/.chunk_${SLURM_ARRAY_TASK_ID}_last25.txt})
+COUNTER=0
+
+while read -r GENE; do
+  echo "Processing gene $GENE"
+  /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/provean.sh --num_threads $SLURM_CPUS_PER_TASK -q genes_fasta/"$GENE".fa -v genes_variants/"$GENE".var --save_supporting_set genes_support/"$GENE".sss > provean_output/"$GENE".provean
+  ((COUNTER++))
+  if [ $(( $COUNTER % 10 )) == 0 ]
+    then
+    echo "Processed $COUNTER genes out of $TOTAL"
+  fi
+  done < ${FILENAME/.txt/.chunk_${SLURM_ARRAY_TASK_ID}_last25.txt}
+
+```
+
+####Send the array-job:
+```{bash}
+
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation
+PARALLEL=20 #define the desired value (same as in the "Choose the partition number" section):
+sbatch --array=1-$PARALLEL /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/parallel_provean_remaining.sh
+
+```
+
+####Retrieve unfinished genes and launch them:
+#####Choose chunks:
+```{bash}
+
+#Once all chunks of a particular job have finished, run this script to retrieve the list of genes which could not be processed before the queue finished.
+
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation
+JOB_ID=7961672 #Introduce the finished job id.
+START=16 #Introduce the first chunk.
+END=20 #Introduce the last chunk.
+
+rm provean_parallel.$JOB_ID.chunk_${START}_to_chunk_${END}.remaining.out
+for ((i=START; i<=END; i++))
+  do
+  ls provean_parallel.$JOB_ID.chunk_${i}.out >> provean_parallel.$JOB_ID.chunk_${START}_to_chunk_${END}.remaining.out
+  done
+
+GENE_LISTS=$(cat provean_parallel.$JOB_ID.chunk_${START}_to_chunk_${END}.remaining.out)
+for gene_list in ${GENE_LISTS[@]}
+  do
+  if grep -q "TIME LIMIT" $gene_list; then
+    INTERRUPTED_GENE=$(grep "Processing gene" $gene_list | tail -n1 | cut -d' ' -f3)
+    echo "removing interrupted $INTERRUPTED_GENE.provean from $gene_list"
+    rm provean_output/$INTERRUPTED_GENE.provean
+    fi
+  done
+
+GENES=$(cat gene_list.chunks_last25.txt)
+rm gene_list.chunks_last25.chunk_${START}_to_chunk_${END}.remaining.txt
+for gene in ${GENES[@]}
+  do
+  if [ ! -f provean_output/${gene}.provean ]
+    then
+    echo $gene
+    echo ${gene} >> gene_list.chunks_last25.chunk_${START}_to_chunk_${END}.remaining.txt
+  fi
+  done
+
+```
+
+#####onethread_provean.sh
+```{bash}
+
+#!/bin/bash
+#SBATCH -p shared --qos shared
+#SBATCH -J provean_onethread
+#SBATCH -o provean_onethread.%A.out
+#SBATCH -t 100:00:00              # Run time (hh:mm:ss)
+#SBATCH -c 24
+#SBATCH --mail-type=TIME_LIMIT_80
+#SBATCH --mail-user=dkmanruiz@gmail.com
+
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation
+module load gcccore/system provean/1.1.5
+
+# Retrieve files:
+FILENAME=$1
+echo "Running provean"
+TOTAL=$(wc -l < ${FILENAME})
+COUNTER=0
+
+while read -r GENE; do
+  echo "Processing gene $GENE"
+  /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/provean.sh --num_threads $SLURM_CPUS_PER_TASK -q genes_fasta/"$GENE".fa -v genes_variants/"$GENE".var --save_supporting_set genes_support/"$GENE".sss > provean_output/"$GENE".provean
+  ((COUNTER++))
+  if [ $(( $COUNTER % 10 )) == 0 ]
+    then
+    echo "Processed $COUNTER genes out of $TOTAL"
+  fi
+  done < ${FILENAME}
+
+```
+
+#####Send the job:
+```{bash}
+
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation
+START=16 #Introduce the first chunk (same as in the "Choose chunks" section).
+END=20 #Introduce the last chunk (same as in the "Choose chunks" section).
+
+sbatch /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/onethread_provean.sh gene_list.chunks_last25.chunk_${START}_to_chunk_${END}.remaining.txt
+
+```
+
+###Calculate average time:
+```{bash}
+
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/provean_output
+rm duration.txt
+for file in $(ls *.provean)
+  do
+  if grep -q SCORE $file; then
+    #echo $file
+    START=$(grep "\[" $file | head -n1 | awk -F'\\[|\\]' '{print $2}')
+    FINISH=$(grep "\[" $file | tail -n1 | awk -F'\\[|\\]' '{print $2}')
+    DURATION=$(( $(date -d "$FINISH" "+%s") - $(date -d "$START" "+%s") ))
+    echo -e "${file/.provean/}\t$DURATION" >> duration.txt
+  fi
+  done
+
+N_GENES_RAW=$(wc -l < duration.txt)
+echo "$N_GENES_RAW genes have been processed"
+
+#Remove negative values (due to day change) since they are the result of bad calculation:
+#awk -F"\t" '{OFS = FS} { sub(/-./,"", $2); print }' duration.txt > duration_fixed.txt
+awk -F"\t" '{OFS = FS} !($2 ~ /-/) { print }' duration.txt > duration_fixed.txt
+mv duration_fixed.txt duration.txt
+
+N_GENES=$(wc -l < duration.txt)
+echo "calculating average using $N_GENES genes"
+SUM=$(cut -f2 duration.txt | paste -sd+ | bc)
+AVERAGE_DURATION_SECS=$(echo "scale=6; $SUM/$N_GENES" | bc)
+echo "average seconds per gene equals $AVERAGE_DURATION_SECS, and average minutes per gene equals:"
+echo "scale=6; $AVERAGE_DURATION_SECS/60" | bc
+
+```
+
+#4. Carry out recombination annotation.
+##Copy and unzip the programmes.
+```{bash}
+
+#From outside the server, copy to the server the two necessary programmes, which Humberto sent me by e-mail:
+
+scp /Users/dani/Downloads/coordinates_converter.zip ramon.pouso@rua2.uvigo.es://share/rdata/ramon.pouso/recombination/
+scp /Users/dani/Downloads/RRC2.zip ramon.pouso@rua2.uvigo.es://share/rdata/ramon.pouso/recombination/
+
+#From inside the server, then unzip both files and their contents, and rename folders. This will be the path:
+cd /share/rdata/ramon.pouso/recombination/
+
+```
+
+##Convert coordinates from the RRC files from dm5 to dm6:
+```{bash}
+
+#Convert the RRC comeron coordinates to the format required by the coordinate converter:
+cd /share/rdata/ramon.pouso/recombination/RRC2/Comeron_tables
+mkdir -p dm5
+mv Comeron_100kb_chr*.txt dm5
+cd dm5
+FILES=$(ls Comeron_100kb_chr*.txt | grep -v "chr4" | grep -v 'dm')
+for file in ${FILES[@]}
+  do
+  echo $file
+  FILENAME=$(echo $file | cut -d'_' -f3 | cut -d'.' -f1 | sed "s/chr//g")
+  awk -v chr=$FILENAME '{printf ("%s:%s..%s\t%s\n",chr,$1,$1+99999,$2)}' <(head -n -1 $file) > ${file/.txt/.dm5.txt}
+  awk -v chr=$FILENAME '{printf ("%s\t%s\t%s\t%s\n",chr,$1,$1+99999,$2)}' <(head -n -1 $file) > ${file/.txt/.dm5.bed}
+  done
+
+#Then save them in a file and use the following script to obtain the v5 to v6 conversion:
+mkdir -p /share/rdata/ramon.pouso/recombination/RRC2/Comeron_tables/dm6
+FILES=$(ls Comeron_100kb_chr*.txt | grep -v "chr4" | grep -v 'dm')
+for file in ${FILES[@]}
+  do
+  echo ${file/.txt/.dm5.txt}
+  new_name=$(echo ${file/.txt/.dm5_to_dm6.txt})
+  cut -f1 ${file/.txt/.dm5.txt} | /share/rdata/ramon.pouso/recombination/coordinates_converter/bulkfile-scripts-master/dmel_r5_to_r6/dmel_r5_to_r6_converter.pl > /share/rdata/ramon.pouso/recombination/RRC2/Comeron_tables/dm6/$new_name
+  grep -v '^#' /share/rdata/ramon.pouso/recombination/RRC2/Comeron_tables/dm6/$new_name | awk -F":|\\\\.\\\\.|\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n",$1,$2,$3,$4,$5,$6)}' > /share/rdata/ramon.pouso/recombination/RRC2/Comeron_tables/dm6/${new_name/.txt/.bed}
+  done
+
+#Next use bedtools intersect to cross the file with old coordinates and recombination values with the file with both old and new coordinates:
+cd /share/rdata/ramon.pouso/recombination/RRC2/Comeron_tables
+module load gcc/7.2.0
+module add gcc/7.2.0
+FILES=$(ls dm5/Comeron_100kb_chr*.dm5.bed | grep -v "chr4" | cut -d'/' -f2)
+for file in ${FILES[@]}
+  do
+  bedtools intersect -a dm5/$file -b dm6/${file/.dm5.bed/.dm5_to_dm6.bed} -wa -wb | awk -F"\t" '{printf ("%s\t%s\t%s\t%s\n",$8,$9,$10,$4)}' > dm6/${file/.dm5.bed/.dm6.bed}
+  cut -f2,4 dm6/${file/.dm5.bed/.dm6.bed} > ${file/.dm5.bed/.txt}
+  done
+cat dm6/Comeron_100kb_chr*.dm6.bed > dm6/Comeron_100kb_allchr.dm6.bed
+
+```
+
+##Retrieve recombination value for each SNP:
+###Option A: use the RRC software.
+```{bash}
+
+cd /share/rdata/ramon.pouso/recombination/RRC2
+
+#Then run RRC using:
+/share/rdata/ramon.pouso/recombination/RRC2/RRC-open-v2.3.pl -M $input #replace Comeron coordinates with edited ones! !!!MISSING. THE .pl NEEDS TO BE EDITED AT SEVERAL POINTS!?
+
+```
+
+###Option B: intersect files with bedtools.
+```{bash}
+
+cd /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned
+module load gcc/7.2.0
+module add gcc/7.2.0
+bedtools intersect -a crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.polarized.nr_annovar.dm6nr_multianno.bed -b /share/rdata/ramon.pouso/recombination/RRC2/Comeron_tables/dm6/Comeron_100kb_allchr.dm6.bed -wb | awk -F"\t" '{printf ("%s\t%s\t%s\t%s\n",$1,$2,$3,$8)}' > crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.polarized.nr_annovar.dm6nr_multianno.recombination.bed
 
 ```
