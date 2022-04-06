@@ -1,0 +1,1635 @@
+---
+title: "count"
+output: html_document
+---
+
+#0. Prepare the final annotated VCFs for splitting:
+##Individuals:
+```{R, engine='bash'}
+
+#The final VCFs had a few triallelic sites (the biallelic filter was applied per population, so when they were subsequently combined, some sites ended up being triallelic).
+
+cd /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/
+
+grep '^#' Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.annovar.dm6_multianno.vcf > Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.annovar.dm6_multianno.filtered.vcf
+grep -v '^#' Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.annovar.dm6_multianno.vcf | awk '!($5 ~ /,/) { print }' >> Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.annovar.dm6_multianno.filtered.vcf
+
+grep '^#' Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.annovar.dm6_multianno.vcf > Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.annovar.dm6_multianno.filtered.vcf
+grep -v '^#' Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.annovar.dm6_multianno.vcf | awk '!($5 ~ /,/) { print }' >> Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.annovar.dm6_multianno.filtered.vcf
+
+```
+
+##Pools:
+###Fix gen 140 pools VCF:
+####README:
+```{R, engine='bash'}
+
+#When extracting counts I realised that the base population gen 140 was wrong (all counts were 0). In the end the issue is that during the calling with CRISP the wrong bam was used as input ("c1" which is gen 5 from the base pop, instead of "C1" which is gen 140 from the base pop), and on top of this, that bam was corrupted and lacked information, but somehow CRISP didn't complain and processed it as 0s. #To fix it, I followed these subsequent steps:
+
+```
+
+####Prepare files:
+```{R, engine='bash'}
+
+#First I removed the bam files derived from the problematic one:
+cd /share/rdata/ramon.pouso/POOLS/gen140/gen140/5processed
+rm autosomic_isolated/c1_gen140_bwa_iso_rmdup_mq30_rg_multirealigned_autosomic.bam
+rm x_isolated/c1_gen140_bwa_iso_rmdup_mq30_rg_multirealigned_x.bam
+
+#Next I moved all previous VCF related files to the following folders:
+cd /share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/not_masked
+mkdir obsolete_wrong
+mv * obsolete_wrong
+/share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/masked
+mkdir obsolete_wrong
+mv * obsolete_wrong
+
+```
+
+####Isolate chromosomes:
+```{R, engine='bash'}
+
+#Next, isolate autosomes and the Xchr from the correct bam:
+cd /share/rdata/ramon.pouso/POOLS/gen140/gen140/5processed
+qsub -cwd -l h=compute-0-9 /share/rdata/ramon.pouso/Scripts/samtools_view_autosomic.sh C1_bwa_iso_rmdup_mq30_rg_multirealigned.bam autosomic_isolated/C1_bwa_iso_rmdup_mq30_rg_multirealigned_autosomic.bam
+qsub -cwd -l h=compute-0-9 /share/rdata/ramon.pouso/Scripts/samtools_view_onlyX.sh C1_bwa_iso_rmdup_mq30_rg_multirealigned.bam x_isolated/C1_bwa_iso_rmdup_mq30_rg_multirealigned_x.bam
+
+```
+
+####Perform the CRISP calling:
+#####crisp_all_autosomic_dani.sh
+```{R, engine='bash'}
+
+#Launch CRISP with all pools from the gen 140, for autosomes:
+module load crisp/1.0
+
+cd /share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/not_masked/
+BAMLIST=$(ls -v /share/rdata/ramon.pouso/POOLS/gen140/gen140/5processed/autosomic_isolated/*autosomic.bam) #make sure that only the desired BAMs are in the folder
+CRISP --ref /share/rdata/ramon.pouso/reference/indexed_reference/dmel-all-chromosome-r6.14.fasta --VCF $1 \
+$(for bam in $BAMLIST; do echo --bam ${bam}" "; done) -p 160 > all_autosomic.log
+
+#Launch this as follows:
+## cd /share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/not_masked/
+## qsub -cwd -l h=compute-0-9 /share/rdata/ramon.pouso/POOLS/Scripts/crisp_all_autosomic_dani.sh crisp_all_gen140_autosomic.vcf
+
+```
+
+#####crisp_all_x_dani.sh
+```{R, engine='bash'}
+
+#Launch CRISP with all pools from the gen 140, for autosomes:
+module load crisp/1.0
+
+cd /share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/not_masked/
+BAMLIST=$(ls -v /share/rdata/ramon.pouso/POOLS/gen140/gen140/5processed/x_isolated/*x.bam) #make sure that only the desired BAMs are in the folder
+CRISP --ref /share/rdata/ramon.pouso/reference/indexed_reference/dmel-all-chromosome-r6.14.fasta --VCF $1 \
+$(for bam in $BAMLIST; do echo --bam ${bam}" "; done) -p 80 > all_x.log
+
+#Launch this as follows:
+## cd /share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/not_masked/
+## qsub -cwd -l h=compute-0-9 /share/rdata/ramon.pouso/POOLS/Scripts/crisp_all_x_dani.sh crisp_all_gen140_x.vcf
+
+```
+
+####Mask variant files:
+#####Autosomic:
+```{R, engine='bash'}
+
+#Launch this as follows:
+cd /share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/masked
+qsub -cwd -l h=compute-0-9 /share/rdata/ramon.pouso/Scripts/vcf_mask_bed.sh /share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/not_masked/crisp_all_gen140_autosomic.vcf crisp_all_gen140_autosomic_masked /share/rdata/ramon.pouso/reference/indexed_reference/dmel-r6.14_mask.bed
+
+```
+
+#####Xchr:
+```{R, engine='bash'}
+
+#Launch this as follows:
+cd /share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/masked
+qsub -cwd -l h=compute-0-9 /share/rdata/ramon.pouso/Scripts/vcf_mask_bed.sh /share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/not_masked/crisp_all_gen140_x.vcf crisp_all_gen140_x_masked /share/rdata/ramon.pouso/reference/indexed_reference/dmel-r6.14_mask.bed
+
+```
+
+####Keep SNPs:
+#####Autosomic:
+```{R, engine='bash'}
+
+cd /share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/masked
+module load vcftools/0.1.17
+vcftools --vcf crisp_all_gen140_autosomic_masked.recode.vcf --remove-indels --recode --recode-INFO-all --out crisp_all_gen140_autosomic_masked.recode_snps
+mv crisp_all_gen140_autosomic_masked.recode_snps.recode.vcf crisp_all_gen140_autosomic_masked.recode_snps.vcf
+
+```
+
+#####Xchr:
+```{R, engine='bash'}
+
+cd /share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/masked
+module load vcftools/0.1.17
+vcftools --vcf crisp_all_gen140_x_masked.recode.vcf --remove-indels --recode --recode-INFO-all --out crisp_all_gen140_x_masked.recode_snps
+mv crisp_all_gen140_x_masked.recode_snps.recode.vcf crisp_all_gen140_x_masked.recode_snps.vcf
+
+```
+
+####Perform the remaining steps:
+```{R, engine='bash'}
+
+#Now that I've reobtained the files that were my starting point, my entire pipeline has to be rerun on these files.
+
+#First go to the polarisation.Rmd script, section #8 (Polarise the VCFs), subsection ##Obtain final VCFs, and run it for the gen 140 pools.
+
+```
+
+
+###Fix headers (obsolete):
+```{R, engine='bash'}
+
+#The final VCFs had a few triallelic sites (the biallelic filter was applied per population, so when they were subsequently combined, some sites ended up being triallelic).
+
+cd /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/
+
+grep '^#' Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.annovar.dm6_multianno.vcf > Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.annovar.dm6_multianno.filtered.vcf
+grep -v '^#' Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.annovar.dm6_multianno.vcf | awk '!($5 ~ /,/) { print }' >> Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.annovar.dm6_multianno.filtered.vcf
+
+
+cd /share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/masked/
+awk '{gsub("##contig=<ID=2L>","##contig=<ID=2L,length=23513712>");gsub("##contig=<ID=2R>","##contig=<ID=2R,length=25286936>");gsub("##contig=<ID=3L>","##contig=<ID=3L,length=28110227>");gsub("##contig=<ID=3R>","##contig=<ID=3R,length=32079331>");gsub("##contig=<ID=X>","##contig=<ID=X,length=23542271>");print}' crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.polarized.annovar.dm6_multianno.vcf > crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.polarized.annovar.dm6_multianno.good_headers.vcf
+
+```
+
+#1. Split the VCFs at the individual/pool level:
+##Individuals:
+###split_individuals.sh
+```{R, engine='bash'}
+
+cd /share/rdata/ramon.pouso/counts
+module load java/jre/1.8.0_73
+module load GATK/4.1.4
+module load bcftools/1.9
+
+VCF=$1
+if [ $VCF == "/share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.annovar.dm6_multianno.filtered.vcf" ]
+  then
+  SUBSET="autosomes"
+elif [ $VCF == "/share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.annovar.dm6_multianno.filtered.vcf" ]
+  then
+  SUBSET="Xchr"
+fi
+echo $SUBSET
+
+mkdir -p individuals_counts/$SUBSET/
+POPULATIONS=$(bcftools query -l "${VCF}" | rev | cut -d'-' -f2- | rev | sort | uniq)
+POP=$(echo "$POPULATIONS" | sed -n ${SGE_TASK_ID}p)
+INDIVIDUALS=$(bcftools query -l "${VCF}" | awk -v pop="$POP" '$1 ~ pop {print}' | sort | uniq)
+for i in ${INDIVIDUALS[@]}
+  do
+  echo "${i}"
+  ID=$(echo "${i}")
+  java -XX:MaxMetaspaceSize=1g -XX:+UseG1GC -XX:+UseStringDeduplication -Xmx4g -jar /share/apps/GATK/4.1.4/gatk-package-4.1.4.0-local.jar SelectVariants \
+  -R /share/rdata/ramon.pouso/reference/indexed_reference/ancestral_dmel-all-chromosome-r6.14.fa \
+  -V "${VCF}" \
+  -O individuals_counts/$SUBSET/"${i}"_"${SUBSET}"_individual.vcf \
+  --exclude-non-variants \
+  -sn $ID
+  done
+
+```
+
+###Send the array job:
+```{R, engine='bash'}
+
+mkdir -p /share/rdata/ramon.pouso/counts/individuals_counts/
+cd /share/rdata/ramon.pouso/counts/individuals_counts/
+
+module load bcftools/1.9
+VCF=/share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.annovar.dm6_multianno.filtered.vcf
+ #/share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.annovar.dm6_multianno.filtered.vcf #/share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.annovar.dm6_multianno.filtered.vcf
+ 
+N_POPS=$(bcftools query -l "${VCF}" | rev | cut -d'-' -f2- | rev | sort | uniq | wc -l)
+qsub -cwd -l h=compute-0-9 -t 1-$N_POPS /share/rdata/ramon.pouso/counts/Scripts/split_individuals.sh $VCF
+
+```
+
+##Pools:
+###split_pools.sh
+```{R, engine='bash'}
+
+cd /share/rdata/ramon.pouso/counts
+module load java/jre/1.8.0_73
+module load GATK/4.1.4
+module load bcftools/1.9
+
+VCF=$1
+if [ $VCF == "/share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.polarized.annovar.dm6_multianno.vcf" ]
+  then
+  SUBSET="gen0-40"
+elif [ $VCF == "/share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/masked/crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.polarized.annovar.dm6_multianno.vcf" ]
+  then
+  SUBSET="gen140"
+fi
+echo $SUBSET
+
+mkdir -p pools_counts/$SUBSET/
+POOLS=$(bcftools query -l "${VCF}")
+for p in ${POOLS[@]}
+  do
+  echo "${p}"
+  ID=$(echo "${p}")
+  POOL_NAME=$(echo "${p}" | cut -d'_' -f1 | sort | uniq)
+  FIELD_NUMBER=$(grep "^#" $VCF | grep -v '##' | tr "\t" "\n" | grep -nw $p | cut -d':' -f1)
+  paste <(grep -v '^#' $VCF | cut -f1-8) <(grep -v '^#' $VCF | cut -f$FIELD_NUMBER | awk -F":|," '{printf ("%s\t%s\n", $4+$6+$8,$5+$7+$9)}') | awk '$10 > 0' > pools_counts/$SUBSET/"${POOL_NAME}"_"${SUBSET}"_pool.txt
+  done
+
+```
+
+###Send the array job:
+```{R, engine='bash'}
+
+mkdir -p /share/rdata/ramon.pouso/counts/pools_counts/
+cd /share/rdata/ramon.pouso/counts/pools_counts/
+
+VCF=/share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/masked/crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.polarized.annovar.dm6_multianno.vcf #/share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.polarized.annovar.dm6_multianno.vcf #/share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/masked/crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.polarized.annovar.dm6_multianno.vcf
+ 
+qsub -cwd -l h=compute-0-9 /share/rdata/ramon.pouso/counts/Scripts/split_pools.sh $VCF
+
+```
+
+#2. Retrieve counts.
+##individual_counts.sh:
+```{R, engine='bash'}
+
+#Launch it as follows:
+#cd /share/rdata/ramon.pouso/counts/individuals_counts/
+#qsub -cwd -l h=compute-0-9 /share/rdata/ramon.pouso/counts/Scripts/individual_counts.sh SUBSET
+##Where SUBSET should be replaced with either "autosomes" or "Xchr"
+
+SUBSET=$1
+
+module load gcc/7.2.0
+module add gcc/7.2.0
+cd /share/rdata/ramon.pouso/counts/individuals_counts/$SUBSET/
+rm counts_individual_${SUBSET}_summary.txt
+echo -e "sample\ttotal_V\ttotal_D\tintronic_V\tintronic_D\tsynonymous_V\tsynonymous_D\tmissense_V\tmissense_D\ttolerated_V\ttolerated_D\tdeleterious_V\tdeleterious_D\tstopgain_V\tstopgain_D\tstoploss_V\tstoploss_D" > counts_individual_${SUBSET}_summary.txt
+INDLIST=($(ls `find . -name '*_'${SUBSET}'_individual.vcf' -print`))
+for i in "${INDLIST[@]}"
+  do
+  #echo "${i}"
+  SAMPLE=$(echo "${i}" | cut -d'/' -f2 | cut -d'_' -f1)
+  echo $SAMPLE
+  TOTAL_V=$(grep -v '#' ${i} | wc -l)
+  TOTAL_D=$(grep -v '#' ${i} | cut -f8 | awk -F";AC=|;AF=" '{printf ("%s\n"),$2}' | paste -sd+ | bc)
+  INTRONIC_V=$(grep ';Func.refGene=intronic;' ${i} | wc -l)
+  INTRONIC_D=$(grep ';Func.refGene=intronic;' ${i} | cut -f8 | awk -F";AC=|;AF=" '{printf ("%s\n"),$2}' | paste -sd+ | bc)
+  SYNONYMOUS_V=$(grep ';ExonicFunc.refGene=synonymous_SNV;' ${i} | wc -l)
+  SYNONYMOUS_D=$(grep ';ExonicFunc.refGene=synonymous_SNV;' ${i} | cut -f8 | awk -F";AC=|;AF=" '{printf ("%s\n"),$2}' | paste -sd+ | bc)
+  MISSENSE_V=$(grep ';ExonicFunc.refGene=nonsynonymous_SNV;' ${i} | wc -l)
+  MISSENSE_D=$(grep ';ExonicFunc.refGene=nonsynonymous_SNV;' ${i} | cut -f8 | awk -F";AC=|;AF=" '{printf ("%s\n"),$2}' | paste -sd+ | bc)
+  bedtools intersect -a ${i} -b /share/rdata/ramon.pouso/counts/missense_variants_provean_SIFT_tolerated.bed > ${SAMPLE}_missense_tolerated_${SUBSET}.txt
+  MISTOL_V=$(wc -l < ${SAMPLE}_missense_tolerated_${SUBSET}.txt)
+  MISTOL_D=$(cut -f8 ${SAMPLE}_missense_tolerated_${SUBSET}.txt | awk -F";AC=|;AF=" '{printf ("%s\n"),$2}' | paste -sd+ | bc)
+  bedtools intersect -a ${i} -b /share/rdata/ramon.pouso/counts/missense_variants_provean_SIFT_deleterious.bed > ${SAMPLE}_missense_deleterious_${SUBSET}.txt
+  MISDEL_V=$(wc -l < ${SAMPLE}_missense_deleterious_${SUBSET}.txt)
+  MISDEL_D=$(cut -f8 ${SAMPLE}_missense_deleterious_${SUBSET}.txt | awk -F";AC=|;AF=" '{printf ("%s\n"),$2}' | paste -sd+ | bc)
+  STOPGAIN_V=$(grep ';ExonicFunc.refGene=stopgain;' ${i} | wc -l)
+  if [ "$STOPGAIN_V" -eq 0 ]; then STOPGAIN_D=0; else STOPGAIN_D=$(grep ';ExonicFunc.refGene=stopgain;' ${i} | cut -f8 | awk -F";AC=|;AF=" '{printf ("%s\n"),$2}' | paste -sd+ | bc); fi
+  STOPLOSS_V=$(grep ';ExonicFunc.refGene=stoploss;' ${i} | wc -l)
+  if [ "$STOPLOSS_V" -eq 0 ]; then STOPLOSS_D=0; else STOPLOSS_D=$(grep ';ExonicFunc.refGene=stoploss;' ${i} | cut -f8 | awk -F";AC=|;AF=" '{printf ("%s\n"),$2}' | paste -sd+ | bc); fi
+  echo -e "$SAMPLE\t$TOTAL_V\t$TOTAL_D\t$INTRONIC_V\t$INTRONIC_D\t$SYNONYMOUS_V\t$SYNONYMOUS_D\t$MISSENSE_V\t$MISSENSE_D\t$MISTOL_V\t$MISTOL_D\t$MISDEL_V\t$MISDEL_D\t$STOPGAIN_V\t$STOPGAIN_D\t$STOPLOSS_V\t$STOPLOSS_D" >> counts_individual_${SUBSET}_summary.txt
+  done
+
+```
+
+##pool_counts_all.sh:
+```{R, engine='bash'}
+
+#Launch it as follows:
+#cd /share/rdata/ramon.pouso/counts/pools_counts/
+#qsub -cwd -l h=compute-0-9 /share/rdata/ramon.pouso/counts/Scripts/pool_counts_all.sh SUBSET
+##Where SUBSET should be replaced with either "gen0-40" or "gen140"
+
+SUBSET=$1
+
+module load gcc/7.2.0
+module add gcc/7.2.0
+cd /share/rdata/ramon.pouso/counts/pools_counts/$SUBSET/
+rm counts_pool_${SUBSET}_all_summary.txt
+echo -e "sample\ttotal_V\ttotal_D\ttotal_propD\tintronic_V\tintronic_D\tintronic_propD\tsynonymous_V\tsynonymous_D\tsynonymous_propD\tmissense_V\tmissense_D\tmissense_propD\ttolerated_V\ttolerated_D\ttolerated_propD\tdeleterious_V\tdeleterious_D\tdeleterious_propD\tstopgain_V\tstopgain_D\tstopgain_propD\tstoploss_V\tstoploss_D\tstoploss_propD" > counts_pool_${SUBSET}_all_summary.txt
+POOL_LIST=($(ls -rt `find . -name '*_'${SUBSET}'_pool.txt' -print`))
+for p in "${POOL_LIST[@]}"
+  do
+  #echo "${p}"
+  SAMPLE=$(echo "${p}" | cut -d'/' -f2 | cut -d'_' -f1)
+  echo $SAMPLE
+  TOTAL_V=$(wc -l < ${p})
+  TOTAL_A=$(cut -f9 ${p} | paste -sd+ | bc)
+  TOTAL_D=$(cut -f10 ${p} | paste -sd+ | bc)
+  TOTAL_PROP_D=$(echo "scale=5; $TOTAL_D/$((TOTAL_A+TOTAL_D))" | bc)
+  INTRONIC_V=$(grep ';Func.refGene=intronic;' ${p} | wc -l)
+  INTRONIC_A=$(grep ';Func.refGene=intronic;' ${p} | cut -f9 | paste -sd+ | bc)
+  INTRONIC_D=$(grep ';Func.refGene=intronic;' ${p} | cut -f10 | paste -sd+ | bc)
+  INTRONIC_PROP_D=$(echo "scale=5; $INTRONIC_D/$((INTRONIC_A+INTRONIC_D))" | bc)
+  SYNONYMOUS_V=$(grep ';ExonicFunc.refGene=synonymous_SNV;' ${p} | wc -l)
+  SYNONYMOUS_A=$(grep ';ExonicFunc.refGene=synonymous_SNV;' ${p} | cut -f9 | paste -sd+ | bc)
+  SYNONYMOUS_D=$(grep ';ExonicFunc.refGene=synonymous_SNV;' ${p} | cut -f10 | paste -sd+ | bc)
+  SYNONYMOUS_PROP_D=$(echo "scale=5; $SYNONYMOUS_D/$((SYNONYMOUS_A+SYNONYMOUS_D))" | bc)
+  MISSENSE_V=$(grep ';ExonicFunc.refGene=nonsynonymous_SNV;' ${p} | wc -l)
+  MISSENSE_A=$(grep ';ExonicFunc.refGene=nonsynonymous_SNV;' ${p} | cut -f9 | paste -sd+ | bc)
+  MISSENSE_D=$(grep ';ExonicFunc.refGene=nonsynonymous_SNV;' ${p} | cut -f10 | paste -sd+ | bc)
+  MISSENSE_PROP_D=$(echo "scale=5; $MISSENSE_D/$((MISSENSE_A+MISSENSE_D))" | bc)
+  awk '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5,$6,$7,$8,$9,$10)}' ${p} | bedtools intersect -a stdin -b /share/rdata/ramon.pouso/counts/missense_variants_provean_SIFT_tolerated.bed > ${SAMPLE}_${SUBSET}_missense_tolerated.txt
+  MISTOL_V=$(wc -l < ${SAMPLE}_${SUBSET}_missense_tolerated.txt)
+  MISTOL_A=$(cut -f10 ${SAMPLE}_${SUBSET}_missense_tolerated.txt | paste -sd+ | bc)
+  MISTOL_D=$(cut -f11 ${SAMPLE}_${SUBSET}_missense_tolerated.txt | paste -sd+ | bc)
+  MISTOL_PROP_D=$(echo "scale=5; $MISTOL_D/$((MISTOL_A+MISTOL_D))" | bc)
+  awk '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5,$6,$7,$8,$9,$10)}' ${p} | bedtools intersect -a stdin -b /share/rdata/ramon.pouso/counts/missense_variants_provean_SIFT_deleterious.bed > ${SAMPLE}_${SUBSET}_missense_deleterious.txt
+  MISDEL_V=$(wc -l < ${SAMPLE}_${SUBSET}_missense_deleterious.txt)
+  MISDEL_A=$(cut -f10 ${SAMPLE}_${SUBSET}_missense_deleterious.txt | paste -sd+ | bc)
+  MISDEL_D=$(cut -f11 ${SAMPLE}_${SUBSET}_missense_deleterious.txt | paste -sd+ | bc)
+  MISDEL_PROP_D=$(echo "scale=5; $MISDEL_D/$((MISDEL_A+MISDEL_D))" | bc)
+  STOPGAIN_V=$(grep ';ExonicFunc.refGene=stopgain;' ${p} | wc -l)
+  if [ "$STOPGAIN_V" -eq 0 ]
+    then 
+    STOPGAIN_A=0
+    STOPGAIN_D=0
+    STOPGAIN_PROP_D=0
+    else 
+    STOPGAIN_A=$(grep ';ExonicFunc.refGene=stopgain;' ${p} | cut -f9 | paste -sd+ | bc)
+    STOPGAIN_D=$(grep ';ExonicFunc.refGene=stopgain;' ${p} | cut -f10 | paste -sd+ | bc)
+    STOPGAIN_PROP_D=$(echo "scale=5; $STOPGAIN_D/$((STOPGAIN_A+STOPGAIN_D))" | bc)
+  fi
+  STOPLOSS_V=$(grep ';ExonicFunc.refGene=stoploss;' ${p} | wc -l)
+  if [ "$STOPLOSS_V" -eq 0 ]
+    then 
+    STOPLOSS_A=0
+    STOPLOSS_D=0
+    STOPLOSS_PROP_D=0
+    else 
+    STOPLOSS_A=$(grep ';ExonicFunc.refGene=stoploss;' ${p} | cut -f9 | paste -sd+ | bc)
+    STOPLOSS_D=$(grep ';ExonicFunc.refGene=stoploss;' ${p} | cut -f10 | paste -sd+ | bc)
+    STOPLOSS_PROP_D=$(echo "scale=5; $STOPLOSS_D/$((STOPLOSS_A+STOPLOSS_D))" | bc)
+  fi
+  echo -e "$SAMPLE\t$TOTAL_V\t$TOTAL_D\t$TOTAL_PROP_D\t$INTRONIC_V\t$INTRONIC_D\t$INTRONIC_PROP_D\t$SYNONYMOUS_V\t$SYNONYMOUS_D\t$SYNONYMOUS_PROP_D\t$MISSENSE_V\t$MISSENSE_D\t$MISSENSE_PROP_D\t$MISTOL_V\t$MISTOL_D\t$MISTOL_PROP_D\t$MISDEL_V\t$MISDEL_D\t$MISDEL_PROP_D\t$STOPGAIN_V\t$STOPGAIN_D\t$STOPGAIN_PROP_D\t$STOPLOSS_V\t$STOPLOSS_D\t$STOPLOSS_PROP_D" >> counts_pool_${SUBSET}_all_summary.txt
+  done
+  
+```
+
+##pool_counts_autosomes.sh:
+```{R, engine='bash'}
+
+#Launch it as follows:
+#cd /share/rdata/ramon.pouso/counts/pools_counts/
+#qsub -cwd -l h=compute-0-9 /share/rdata/ramon.pouso/counts/Scripts/pool_counts_autosomes.sh SUBSET
+##Where SUBSET should be replaced with either "gen0-40" or "gen140"
+
+SUBSET=$1
+
+module load gcc/7.2.0
+module add gcc/7.2.0
+cd /share/rdata/ramon.pouso/counts/pools_counts/$SUBSET/
+rm counts_pool_${SUBSET}_autosomes_summary.txt
+echo -e "sample\ttotal_V\ttotal_D\ttotal_propD\tintronic_V\tintronic_D\tintronic_propD\tsynonymous_V\tsynonymous_D\tsynonymous_propD\tmissense_V\tmissense_D\tmissense_propD\ttolerated_V\ttolerated_D\ttolerated_propD\tdeleterious_V\tdeleterious_D\tdeleterious_propD\tstopgain_V\tstopgain_D\tstopgain_propD\tstoploss_V\tstoploss_D\tstoploss_propD" > counts_pool_${SUBSET}_autosomes_summary.txt
+POOL_LIST=($(ls -rt `find . -name '*_'${SUBSET}'_pool.txt' -print`))
+for pool in "${POOL_LIST[@]}"
+  do
+  grep -v "^X" $pool > ${pool/.txt/_autosomes.txt}
+  SAMPLE=$(echo "${pool}" | cut -d'/' -f2 | cut -d'_' -f1)
+  echo $SAMPLE
+  p=${pool/.txt/_autosomes.txt}
+  TOTAL_V=$(wc -l < ${p})
+  TOTAL_A=$(cut -f9 ${p} | paste -sd+ | bc)
+  TOTAL_D=$(cut -f10 ${p} | paste -sd+ | bc)
+  TOTAL_PROP_D=$(echo "scale=5; $TOTAL_D/$((TOTAL_A+TOTAL_D))" | bc)
+  INTRONIC_V=$(grep ';Func.refGene=intronic;' ${p} | wc -l)
+  INTRONIC_A=$(grep ';Func.refGene=intronic;' ${p} | cut -f9 | paste -sd+ | bc)
+  INTRONIC_D=$(grep ';Func.refGene=intronic;' ${p} | cut -f10 | paste -sd+ | bc)
+  INTRONIC_PROP_D=$(echo "scale=5; $INTRONIC_D/$((INTRONIC_A+INTRONIC_D))" | bc)
+  SYNONYMOUS_V=$(grep ';ExonicFunc.refGene=synonymous_SNV;' ${p} | wc -l)
+  SYNONYMOUS_A=$(grep ';ExonicFunc.refGene=synonymous_SNV;' ${p} | cut -f9 | paste -sd+ | bc)
+  SYNONYMOUS_D=$(grep ';ExonicFunc.refGene=synonymous_SNV;' ${p} | cut -f10 | paste -sd+ | bc)
+  SYNONYMOUS_PROP_D=$(echo "scale=5; $SYNONYMOUS_D/$((SYNONYMOUS_A+SYNONYMOUS_D))" | bc)
+  MISSENSE_V=$(grep ';ExonicFunc.refGene=nonsynonymous_SNV;' ${p} | wc -l)
+  MISSENSE_A=$(grep ';ExonicFunc.refGene=nonsynonymous_SNV;' ${p} | cut -f9 | paste -sd+ | bc)
+  MISSENSE_D=$(grep ';ExonicFunc.refGene=nonsynonymous_SNV;' ${p} | cut -f10 | paste -sd+ | bc)
+  MISSENSE_PROP_D=$(echo "scale=5; $MISSENSE_D/$((MISSENSE_A+MISSENSE_D))" | bc)
+  awk '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5,$6,$7,$8,$9,$10)}' ${p} | bedtools intersect -a stdin -b /share/rdata/ramon.pouso/counts/missense_variants_provean_SIFT_tolerated.bed > ${SAMPLE}_${SUBSET}_missense_tolerated_autosomes.txt
+  MISTOL_V=$(wc -l < ${SAMPLE}_${SUBSET}_missense_tolerated_autosomes.txt)
+  MISTOL_A=$(cut -f10 ${SAMPLE}_${SUBSET}_missense_tolerated_autosomes.txt | paste -sd+ | bc)
+  MISTOL_D=$(cut -f11 ${SAMPLE}_${SUBSET}_missense_tolerated_autosomes.txt | paste -sd+ | bc)
+  MISTOL_PROP_D=$(echo "scale=5; $MISTOL_D/$((MISTOL_A+MISTOL_D))" | bc)
+  awk '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5,$6,$7,$8,$9,$10)}' ${p} | bedtools intersect -a stdin -b /share/rdata/ramon.pouso/counts/missense_variants_provean_SIFT_deleterious.bed > ${SAMPLE}_${SUBSET}_missense_deleterious_autosomes.txt
+  MISDEL_V=$(wc -l < ${SAMPLE}_${SUBSET}_missense_deleterious_autosomes.txt)
+  MISDEL_A=$(cut -f10 ${SAMPLE}_${SUBSET}_missense_deleterious_autosomes.txt | paste -sd+ | bc)
+  MISDEL_D=$(cut -f11 ${SAMPLE}_${SUBSET}_missense_deleterious_autosomes.txt | paste -sd+ | bc)
+  MISDEL_PROP_D=$(echo "scale=5; $MISDEL_D/$((MISDEL_A+MISDEL_D))" | bc)
+  STOPGAIN_V=$(grep ';ExonicFunc.refGene=stopgain;' ${p} | wc -l)
+  if [ "$STOPGAIN_V" -eq 0 ]
+    then 
+    STOPGAIN_A=0
+    STOPGAIN_D=0
+    STOPGAIN_PROP_D=0
+    else 
+    STOPGAIN_A=$(grep ';ExonicFunc.refGene=stopgain;' ${p} | cut -f9 | paste -sd+ | bc)
+    STOPGAIN_D=$(grep ';ExonicFunc.refGene=stopgain;' ${p} | cut -f10 | paste -sd+ | bc)
+    STOPGAIN_PROP_D=$(echo "scale=5; $STOPGAIN_D/$((STOPGAIN_A+STOPGAIN_D))" | bc)
+  fi
+  STOPLOSS_V=$(grep ';ExonicFunc.refGene=stoploss;' ${p} | wc -l)
+  if [ "$STOPLOSS_V" -eq 0 ]
+    then 
+    STOPLOSS_A=0
+    STOPLOSS_D=0
+    STOPLOSS_PROP_D=0
+    else 
+    STOPLOSS_A=$(grep ';ExonicFunc.refGene=stoploss;' ${p} | cut -f9 | paste -sd+ | bc)
+    STOPLOSS_D=$(grep ';ExonicFunc.refGene=stoploss;' ${p} | cut -f10 | paste -sd+ | bc)
+    STOPLOSS_PROP_D=$(echo "scale=5; $STOPLOSS_D/$((STOPLOSS_A+STOPLOSS_D))" | bc)
+  fi
+  echo -e "$SAMPLE\t$TOTAL_V\t$TOTAL_D\t$TOTAL_PROP_D\t$INTRONIC_V\t$INTRONIC_D\t$INTRONIC_PROP_D\t$SYNONYMOUS_V\t$SYNONYMOUS_D\t$SYNONYMOUS_PROP_D\t$MISSENSE_V\t$MISSENSE_D\t$MISSENSE_PROP_D\t$MISTOL_V\t$MISTOL_D\t$MISTOL_PROP_D\t$MISDEL_V\t$MISDEL_D\t$MISDEL_PROP_D\t$STOPGAIN_V\t$STOPGAIN_D\t$STOPGAIN_PROP_D\t$STOPLOSS_V\t$STOPLOSS_D\t$STOPLOSS_PROP_D" >> counts_pool_${SUBSET}_autosomes_summary.txt
+  done
+  
+```
+
+##pool_counts_Xchr.sh:
+```{R, engine='bash'}
+
+#Launch it as follows:
+#cd /share/rdata/ramon.pouso/counts/pools_counts/
+#qsub -cwd -l h=compute-0-9 /share/rdata/ramon.pouso/counts/Scripts/pool_counts_Xchr.sh SUBSET
+##Where SUBSET should be replaced with either "gen0-40" or "gen140"
+
+SUBSET=$1
+
+module load gcc/7.2.0
+module add gcc/7.2.0
+cd /share/rdata/ramon.pouso/counts/pools_counts/$SUBSET/
+rm counts_pool_${SUBSET}_Xchr_summary.txt
+echo -e "sample\ttotal_V\ttotal_D\ttotal_propD\tintronic_V\tintronic_D\tintronic_propD\tsynonymous_V\tsynonymous_D\tsynonymous_propD\tmissense_V\tmissense_D\tmissense_propD\ttolerated_V\ttolerated_D\ttolerated_propD\tdeleterious_V\tdeleterious_D\tdeleterious_propD\tstopgain_V\tstopgain_D\tstopgain_propD\tstoploss_V\tstoploss_D\tstoploss_propD" > counts_pool_${SUBSET}_Xchr_summary.txt
+POOL_LIST=($(ls -rt `find . -name '*_'${SUBSET}'_pool.txt' -print`))
+for pool in "${POOL_LIST[@]}"
+  do
+  grep "^X" $pool > ${pool/.txt/_Xchr.txt}
+  SAMPLE=$(echo "${pool}" | cut -d'/' -f2 | cut -d'_' -f1)
+  echo $SAMPLE
+  p=${pool/.txt/_Xchr.txt}
+  TOTAL_V=$(wc -l < ${p})
+  TOTAL_A=$(cut -f9 ${p} | paste -sd+ | bc)
+  TOTAL_D=$(cut -f10 ${p} | paste -sd+ | bc)
+  TOTAL_PROP_D=$(echo "scale=5; $TOTAL_D/$((TOTAL_A+TOTAL_D))" | bc)
+  INTRONIC_V=$(grep ';Func.refGene=intronic;' ${p} | wc -l)
+  INTRONIC_A=$(grep ';Func.refGene=intronic;' ${p} | cut -f9 | paste -sd+ | bc)
+  INTRONIC_D=$(grep ';Func.refGene=intronic;' ${p} | cut -f10 | paste -sd+ | bc)
+  INTRONIC_PROP_D=$(echo "scale=5; $INTRONIC_D/$((INTRONIC_A+INTRONIC_D))" | bc)
+  SYNONYMOUS_V=$(grep ';ExonicFunc.refGene=synonymous_SNV;' ${p} | wc -l)
+  SYNONYMOUS_A=$(grep ';ExonicFunc.refGene=synonymous_SNV;' ${p} | cut -f9 | paste -sd+ | bc)
+  SYNONYMOUS_D=$(grep ';ExonicFunc.refGene=synonymous_SNV;' ${p} | cut -f10 | paste -sd+ | bc)
+  SYNONYMOUS_PROP_D=$(echo "scale=5; $SYNONYMOUS_D/$((SYNONYMOUS_A+SYNONYMOUS_D))" | bc)
+  MISSENSE_V=$(grep ';ExonicFunc.refGene=nonsynonymous_SNV;' ${p} | wc -l)
+  MISSENSE_A=$(grep ';ExonicFunc.refGene=nonsynonymous_SNV;' ${p} | cut -f9 | paste -sd+ | bc)
+  MISSENSE_D=$(grep ';ExonicFunc.refGene=nonsynonymous_SNV;' ${p} | cut -f10 | paste -sd+ | bc)
+  MISSENSE_PROP_D=$(echo "scale=5; $MISSENSE_D/$((MISSENSE_A+MISSENSE_D))" | bc)
+  awk '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5,$6,$7,$8,$9,$10)}' ${p} | bedtools intersect -a stdin -b /share/rdata/ramon.pouso/counts/missense_variants_provean_SIFT_tolerated.bed > ${SAMPLE}_${SUBSET}_missense_tolerated_Xchr.txt
+  MISTOL_V=$(wc -l < ${SAMPLE}_${SUBSET}_missense_tolerated_Xchr.txt)
+  MISTOL_A=$(cut -f10 ${SAMPLE}_${SUBSET}_missense_tolerated_Xchr.txt | paste -sd+ | bc)
+  MISTOL_D=$(cut -f11 ${SAMPLE}_${SUBSET}_missense_tolerated_Xchr.txt | paste -sd+ | bc)
+  MISTOL_PROP_D=$(echo "scale=5; $MISTOL_D/$((MISTOL_A+MISTOL_D))" | bc)
+  awk '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5,$6,$7,$8,$9,$10)}' ${p} | bedtools intersect -a stdin -b /share/rdata/ramon.pouso/counts/missense_variants_provean_SIFT_deleterious.bed > ${SAMPLE}_${SUBSET}_missense_deleterious_Xchr.txt
+  MISDEL_V=$(wc -l < ${SAMPLE}_${SUBSET}_missense_deleterious_Xchr.txt)
+  MISDEL_A=$(cut -f10 ${SAMPLE}_${SUBSET}_missense_deleterious_Xchr.txt | paste -sd+ | bc)
+  MISDEL_D=$(cut -f11 ${SAMPLE}_${SUBSET}_missense_deleterious_Xchr.txt | paste -sd+ | bc)
+  MISDEL_PROP_D=$(echo "scale=5; $MISDEL_D/$((MISDEL_A+MISDEL_D))" | bc)
+  STOPGAIN_V=$(grep ';ExonicFunc.refGene=stopgain;' ${p} | wc -l)
+  if [ "$STOPGAIN_V" -eq 0 ]
+    then 
+    STOPGAIN_A=0
+    STOPGAIN_D=0
+    STOPGAIN_PROP_D=0
+    else 
+    STOPGAIN_A=$(grep ';ExonicFunc.refGene=stopgain;' ${p} | cut -f9 | paste -sd+ | bc)
+    STOPGAIN_D=$(grep ';ExonicFunc.refGene=stopgain;' ${p} | cut -f10 | paste -sd+ | bc)
+    STOPGAIN_PROP_D=$(echo "scale=5; $STOPGAIN_D/$((STOPGAIN_A+STOPGAIN_D))" | bc)
+  fi
+  STOPLOSS_V=$(grep ';ExonicFunc.refGene=stoploss;' ${p} | wc -l)
+  if [ "$STOPLOSS_V" -eq 0 ]
+    then 
+    STOPLOSS_A=0
+    STOPLOSS_D=0
+    STOPLOSS_PROP_D=0
+    else 
+    STOPLOSS_A=$(grep ';ExonicFunc.refGene=stoploss;' ${p} | cut -f9 | paste -sd+ | bc)
+    STOPLOSS_D=$(grep ';ExonicFunc.refGene=stoploss;' ${p} | cut -f10 | paste -sd+ | bc)
+    STOPLOSS_PROP_D=$(echo "scale=5; $STOPLOSS_D/$((STOPLOSS_A+STOPLOSS_D))" | bc)
+  fi
+  echo -e "$SAMPLE\t$TOTAL_V\t$TOTAL_D\t$TOTAL_PROP_D\t$INTRONIC_V\t$INTRONIC_D\t$INTRONIC_PROP_D\t$SYNONYMOUS_V\t$SYNONYMOUS_D\t$SYNONYMOUS_PROP_D\t$MISSENSE_V\t$MISSENSE_D\t$MISSENSE_PROP_D\t$MISTOL_V\t$MISTOL_D\t$MISTOL_PROP_D\t$MISDEL_V\t$MISDEL_D\t$MISDEL_PROP_D\t$STOPGAIN_V\t$STOPGAIN_D\t$STOPGAIN_PROP_D\t$STOPLOSS_V\t$STOPLOSS_D\t$STOPLOSS_PROP_D" >> counts_pool_${SUBSET}_Xchr_summary.txt
+  done
+  
+```
+
+#3. Plot counts.
+##Derived count ratios:
+###Relative to synonymous:
+####Relative to Pb:
+#####Individuals (relative to Pb-000):
+```{r Plot variant count results}
+
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+type <- "Xchr" #autosomes #Xchr
+
+#Import the individual counts:
+wd_path <- ("/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/")
+individual_counts <- read_tsv(paste0(wd_path,"counts_individual_",type,"_summary.txt"))
+individual_counts <- mutate(individual_counts, population=gsub("-","",substr(sample,1,3)))
+individual_counts$population = factor(individual_counts$population)
+individual_counts$population <- gsub('Pb', 'Pb-140', individual_counts$population)
+
+#Relativise them by the synonymous category:
+individual_counts_copies_synR <- individual_counts %>% mutate(synonymous=synonymous_D/synonymous_D,missense=missense_D/synonymous_D,tolerated=tolerated_D/synonymous_D,deleterious=deleterious_D/synonymous_D,LoF=(stopgain_D+stoploss_D)/synonymous_D) %>% select(c(1,18:23)) %>% gather(ratio,value,-sample,-population,factor_key=T)
+individual_counts_copies_synR
+
+#Import the pool counts and relativise them by the synonymous category in order to retrieve the Pb-000 relativised values (which we'll use as reference here).
+pool_counts <- read_tsv(paste0(wd_path,"counts_pool_gen0-40_",type,"_summary.txt")) %>% mutate(gen=ifelse(sample=="LBT0",000,ifelse(sample=="c1",005,ifelse(sample=="BT20",020,ifelse(sample=="BT30",030,040)))))
+codes_dictionary <- read_tsv(paste0(wd_path,"pop_codes_dictionary.txt"),col_names=c("old","population"))
+pool_counts <- left_join(pool_counts,codes_dictionary,by=c("sample"="old"))
+pool_counts$population = factor(pool_counts$population,levels=c("Pb","L01","L16","L27","L29","L31","L33","L34","L36","L38","L39","L42","L45","L48","L51","L52","L54","L59","L61","L63"))
+pool_counts$gen = factor(pool_counts$gen)
+pool_counts <- pool_counts %>% arrange(population,gen)
+pool_counts_copies_synR <- pool_counts %>% mutate(synonymous=synonymous_D/synonymous_D,missense=missense_D/synonymous_D,tolerated=tolerated_D/synonymous_D,deleterious=deleterious_D/synonymous_D,LoF=(stopgain_D+stoploss_D)/synonymous_D) %>% select(c(1,26:32)) %>% gather(ratio,value,-sample,-gen,-population,factor_key=T)
+pool_counts_copies_synR
+
+#Retrieve the Pb-000 syn-relativised values with the structure of the individual counts database, and relativise the individual values by the Pb-000 ones:
+r_average_vector <- c()
+for (r in unique(individual_counts_copies_synR$ratio)) {
+  print(r)
+  r_average <- filter(pool_counts_copies_synR,r==ratio & population=="Pb" & gen==0) %>% select(value) %>% unlist(.,use.names=F) %>% mean()
+  r_average_vector <- c(r_average_vector,rep(r_average,nrow(filter(individual_counts_copies_synR,r==ratio))))
+}
+print(r_average_vector)
+
+relativised_individual_counts_copies_synR <- mutate(individual_counts_copies_synR, Pb_relative_value=value/r_average_vector)
+
+#Obtain per population averages and standard errors:
+se <- function(x) sqrt(var(x)/length(x)) #first define the standard error function
+
+average_relativised_individual_counts_copies_synR <- data_frame("population"=character(0),"ratio"=character(0),"avg_Pb_relative_value"=character(0),"se_Pb_relative_value"=character(0)) #next, create the empty dataframe
+
+for (pop in unique(relativised_individual_counts_copies_synR$population)) { #then loop over each population and feature to get the (relativised) mean and standard error, and feed the dataframe
+  print(pop)
+  #species <- filter(relativised_individual_counts_copies_synR,ratio==r & population==pop) %>% select(species) %>% unlist(.,use.names=F) %>% unique()
+  for (r in unique(relativised_individual_counts_copies_synR$ratio)) {
+    print(r)
+    pop_mean <- filter(relativised_individual_counts_copies_synR,ratio==r & population==pop) %>% select(Pb_relative_value) %>% unlist(.,use.names=F) %>% mean()
+    #print(paste0(pop," feature ",r," average is ",pop_mean))
+    pop_se <- filter(relativised_individual_counts_copies_synR,ratio==r & population==pop) %>% select(Pb_relative_value) %>% unlist(.,use.names=F) %>% se()
+    #print(paste0(pop," feature ",r," std error is ",pop_se))
+    row_data <- cbind(pop,r,pop_mean,pop_se)
+    colnames(row_data) <- c("population","ratio","avg_Pb_relative_value","se_Pb_relative_value")
+    average_relativised_individual_counts_copies_synR <- rbind(average_relativised_individual_counts_copies_synR,row_data,stringsAsFactors=F)
+  }
+}
+average_relativised_individual_counts_copies_synR$population = factor(average_relativised_individual_counts_copies_synR$population,levels=c("Pb-140","L01","L16","L27","L29","L31","L33","L34","L36","L38","L39","L42","L45","L48","L51","L52","L54","L59","L61","L63"))
+average_relativised_individual_counts_copies_synR$ratio = factor(average_relativised_individual_counts_copies_synR$ratio,levels=c("synonymous","missense","tolerated","deleterious","LoF"))
+
+average_relativised_individual_counts_copies_synR$avg_Pb_relative_value <- as.numeric(average_relativised_individual_counts_copies_synR$avg_Pb_relative_value)
+average_relativised_individual_counts_copies_synR$se_Pb_relative_value <- as.numeric(average_relativised_individual_counts_copies_synR$se_Pb_relative_value)
+average_relativised_individual_counts_copies_synR
+write_tsv(average_relativised_individual_counts_copies_synR,paste0(wd_path,"/pop_average_relativised_individual_counts_copies_synR_",type,".txt"))
+
+#Plot these means and standard errors:
+average_relativised_individual_counts_copies_synR_ggplot <- ggplot(data=filter(average_relativised_individual_counts_copies_synR,ratio!="synonymous"), aes(population,avg_Pb_relative_value,colour=population)) +
+  #facet_wrap(feature ~ species,nrow=6,ncol=2,scales="free") +
+  facet_grid(. ~ ratio) +
+  geom_point() +
+  geom_errorbar(aes(ymin=avg_Pb_relative_value-se_Pb_relative_value, ymax=avg_Pb_relative_value+se_Pb_relative_value), position=position_dodge(), width=0.5) +
+  geom_hline(yintercept=1,linetype="dashed",alpha=0.5) +
+  #ggtitle("Proportion of reads at different NM") +
+  ylab("Average derived count \n relative to synonymous and Pb-000") +
+  scale_y_continuous(breaks = seq(0.6, 1.6, by = 0.2)) +
+  ylim(0.6,1.6) +
+  ggtitle(paste0("Individuals ",type)) +
+  theme_bw() +
+  theme(text=element_text(size=12,face="bold"),
+        rect=element_rect(size=1),
+        axis.line=element_line(colour="black"),
+        axis.title=element_text(size=16),
+        axis.text=element_text(size=10,colour="black"),
+        axis.text.x=element_text(angle=90,hjust=1,vjust = 0.5,colour="black",size=10),
+        #axis.text.y=element_text(size=24,colour="black",margin=margin(t=0.5,unit="cm")),
+        #axis.title.y=element_text(size=30,margin=margin(r=0.5,unit="cm")),
+        panel.background=element_blank(),
+        panel.border=element_rect(colour="black"),
+        #panel.grid=element_blank(),
+        #panel.grid.major=element_line(colour="grey", linetype="dashed", size=0.4),
+        plot.margin=unit(c(0.5,1,0.5,0.5),"cm"),
+        #plot.title=element_text(size=36, face="bold", margin=margin(b=0.5, unit="cm")),
+        legend.background=element_rect(linetype="solid", colour="black", size=.5),
+        #legend.justification=c(0,0),
+        legend.key=element_rect(colour="white"),
+        #legend.key.size=unit(1.3,"cm"),
+        legend.position="none",
+        legend.title=element_blank()
+  )
+average_relativised_individual_counts_copies_synR_ggplot
+ggsave(paste0("pop_average_relativised_individual_counts_copies_synR_",type,".pdf"), width=15, height=12, units="cm", device="pdf", path=wd_path)
+
+```
+
+#####Individuals (relative to Pb-140):
+```{r Plot variant count results}
+
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+type <- "autosomes" #autosomes #Xchr
+
+wd_path <- ("/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/")
+individual_counts <- read_tsv(paste0(wd_path,"counts_individual_",type,"_summary.txt"))
+individual_counts <- mutate(individual_counts, population=gsub("-","",substr(sample,1,3)))
+individual_counts$population = factor(individual_counts$population)
+individual_counts$population <- gsub('Pb', 'Pb-140', individual_counts$population)
+
+
+individual_counts_copies_synR <- individual_counts %>% mutate(synonymous=synonymous_D/synonymous_D,missense=missense_D/synonymous_D,LoF=(stopgain_D+stoploss_D)/synonymous_D) %>% select(c(1,14:17)) %>% gather(ratio,value,-sample,-population,factor_key=T)
+individual_counts_copies_synR
+
+r_average_vector <- c()
+for (r in unique(individual_counts_copies_synR$ratio)) {
+  print(r)
+  r_average <- filter(individual_counts_copies_synR,r==ratio & population=="Pb-140") %>% select(value) %>% unlist(.,use.names=F) %>% mean()
+  r_average_vector <- c(r_average_vector,rep(r_average,nrow(filter(individual_counts_copies_synR,r==ratio))))
+}
+print(r_average_vector)
+
+relativised_individual_counts_copies_synR <- mutate(individual_counts_copies_synR, Pb_relative_value=value/r_average_vector)
+
+#Obtain per population averages and standard errors:
+se <- function(x) sqrt(var(x)/length(x)) #first define the standard error function
+
+average_relativised_individual_counts_copies_synR <- data_frame("population"=character(0),"ratio"=character(0),"avg_Pb_relative_value"=character(0),"se_Pb_relative_value"=character(0)) #next, create the empty dataframe
+
+for (pop in unique(relativised_individual_counts_copies_synR$population)) { #then loop over each population and feature to get the (relativised) mean and standard error, and feed the dataframe
+  print(pop)
+  #species <- filter(relativised_individual_counts_copies_synR,ratio==r & population==pop) %>% select(species) %>% unlist(.,use.names=F) %>% unique()
+  for (r in unique(relativised_individual_counts_copies_synR$ratio)) {
+    print(r)
+    pop_mean <- filter(relativised_individual_counts_copies_synR,ratio==r & population==pop) %>% select(Pb_relative_value) %>% unlist(.,use.names=F) %>% mean()
+    #print(paste0(pop," feature ",r," average is ",pop_mean))
+    pop_se <- filter(relativised_individual_counts_copies_synR,ratio==r & population==pop) %>% select(Pb_relative_value) %>% unlist(.,use.names=F) %>% se()
+    #print(paste0(pop," feature ",r," std error is ",pop_se))
+    row_data <- cbind(pop,r,pop_mean,pop_se)
+    colnames(row_data) <- c("population","ratio","avg_Pb_relative_value","se_Pb_relative_value")
+    average_relativised_individual_counts_copies_synR <- rbind(average_relativised_individual_counts_copies_synR,row_data,stringsAsFactors=F)
+  }
+}
+average_relativised_individual_counts_copies_synR$population = factor(average_relativised_individual_counts_copies_synR$population)
+average_relativised_individual_counts_copies_synR$ratio = factor(average_relativised_individual_counts_copies_synR$ratio,levels=c("synonymous","missense","LoF"))
+
+average_relativised_individual_counts_copies_synR$avg_Pb_relative_value <- as.numeric(average_relativised_individual_counts_copies_synR$avg_Pb_relative_value)
+average_relativised_individual_counts_copies_synR$se_Pb_relative_value <- as.numeric(average_relativised_individual_counts_copies_synR$se_Pb_relative_value)
+average_relativised_individual_counts_copies_synR
+write_tsv(average_relativised_individual_counts_copies_synR,paste0(wd_path,"/pop_average_relativised_individual_counts_copies_synR_",type,".txt"))
+
+#Plot these means and standard errors:
+average_relativised_individual_counts_copies_synR_ggplot <- ggplot(data=filter(average_relativised_individual_counts_copies_synR,ratio!="synonymous"), aes(population,avg_Pb_relative_value,colour=population)) +
+  #facet_wrap(feature ~ species,nrow=6,ncol=2,scales="free") +
+  facet_grid(. ~ ratio) +
+  geom_point() +
+  geom_errorbar(aes(ymin=avg_Pb_relative_value-se_Pb_relative_value, ymax=avg_Pb_relative_value+se_Pb_relative_value), position=position_dodge(), width=0.5) +
+  #ggtitle("Proportion of reads at different NM") +
+  ylab("Average derived count \n relative to synonymous and Pb-140") +
+  scale_y_continuous(breaks = seq(0.8, 1.6, by = 0.2)) +
+  ylim(0.8,1.6) +
+  ggtitle(paste0("Individuals ",type)) +
+  theme_bw() +
+  theme(text=element_text(size=12,face="bold"),
+        rect=element_rect(size=1),
+        axis.line=element_line(colour="black"),
+        axis.title=element_text(size=16),
+        axis.text=element_text(size=10,colour="black"),
+        axis.text.x=element_text(angle=90,hjust=1,vjust = 0.5,colour="black",size=10),
+        #axis.text.y=element_text(size=24,colour="black",margin=margin(t=0.5,unit="cm")),
+        #axis.title.y=element_text(size=30,margin=margin(r=0.5,unit="cm")),
+        panel.background=element_blank(),
+        panel.border=element_rect(colour="black"),
+        #panel.grid=element_blank(),
+        #panel.grid.major=element_line(colour="grey", linetype="dashed", size=0.4),
+        plot.margin=unit(c(0.5,1,0.5,0.5),"cm"),
+        #plot.title=element_text(size=36, face="bold", margin=margin(b=0.5, unit="cm")),
+        legend.background=element_rect(linetype="solid", colour="black", size=.5),
+        #legend.justification=c(0,0),
+        legend.key=element_rect(colour="white"),
+        #legend.key.size=unit(1.3,"cm"),
+        legend.position="none",
+        legend.title=element_blank()
+  )
+average_relativised_individual_counts_copies_synR_ggplot
+ggsave(paste0("pop_average_relativised_individual_counts_copies_synR_",type,".pdf"), width=15, height=12, units="cm", device="pdf", path=wd_path)
+
+```
+
+#####Pools (combined):
+```{r Plot variant count results}
+
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+type <- "Xchr" #all #autosomes #Xchr
+
+wd_path <- ("/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/")
+pool_counts_gen0_40 <- read_tsv(paste0(wd_path,"counts_pool_gen0-40_",type,"_summary.txt")) %>% mutate(gen=ifelse(sample=="LBT0",000,ifelse(sample=="c1",005,ifelse(sample=="BT20",020,ifelse(sample=="BT30",030,040)))))
+pool_counts_gen140 <- read_tsv(paste0(wd_path,"counts_pool_gen140_",type,"_summary.txt")) %>% mutate(gen="140" %>% as.double)
+
+pool_counts <- rbind(pool_counts_gen0_40,pool_counts_gen140)
+
+codes_dictionary <- read_tsv(paste0(wd_path,"pop_codes_dictionary.txt"),col_names=c("old","population"))
+pool_counts <- left_join(pool_counts,codes_dictionary,by=c("sample"="old"))
+pool_counts$population = factor(pool_counts$population,levels=c("Pb","L01","L16","L27","L29","L31","L33","L34","L36","L38","L39","L42","L45","L48","L51","L52","L54","L59","L61","L63"))
+pool_counts$gen = factor(pool_counts$gen)
+pool_counts <- pool_counts %>% arrange(population,gen)
+
+pool_counts_copies_synR <- pool_counts %>% mutate(synonymous=synonymous_D/synonymous_D,missense=missense_D/synonymous_D,tolerated=tolerated_D/synonymous_D,deleterious=deleterious_D/synonymous_D,LoF=(stopgain_D+stoploss_D)/synonymous_D) %>% select(c(1,26:32)) %>% gather(ratio,value,-sample,-gen,-population,factor_key=T)
+pool_counts_copies_synR
+
+r_average_vector <- c()
+for (r in unique(pool_counts_copies_synR$ratio)) {
+  print(r)
+  r_average <- filter(pool_counts_copies_synR,r==ratio & population=="Pb" & gen==0) %>% select(value) %>% unlist(.,use.names=F) %>% mean()
+  r_average_vector <- c(r_average_vector,rep(r_average,nrow(filter(pool_counts_copies_synR,r==ratio))))
+}
+print(r_average_vector)
+
+relativised_pool_counts_copies_synR <- mutate(pool_counts_copies_synR, Pb_relative_value=value/r_average_vector)
+
+#Obtain per population averages and standard errors:
+se <- function(x) sqrt(var(x)/length(x)) #first define the standard error function
+
+average_relativised_pool_counts_copies_synR <- data_frame("population"=character(0),"generation"=character(0),"ratio"=character(0),"avg_Pb_relative_value"=character(0),"se_Pb_relative_value"=character(0)) #next, create the empty dataframe
+
+for (pop in unique(relativised_pool_counts_copies_synR$population)) { #then loop over each population and feature to get the (relativised) mean and standard error, and feed the dataframe
+  print(pop)
+  for (g in unlist(unique(select(filter(relativised_pool_counts_copies_synR,population==pop),gen)),use.names=F)) {
+  #species <- filter(relativised_pool_counts_copies_synR,ratio==r & population==pop) %>% select(species) %>% unlist(.,use.names=F) %>% unique()
+    for (r in unique(relativised_pool_counts_copies_synR$ratio)) {
+      print(r)
+      pop_mean <- filter(relativised_pool_counts_copies_synR,ratio==r & gen==g & population==pop) %>% select(Pb_relative_value) %>% unlist(.,use.names=F) %>% mean()
+      #print(paste0(pop," feature ",r," average is ",pop_mean))
+      pop_se <- filter(relativised_pool_counts_copies_synR,ratio==r & gen==g & population==pop) %>% select(Pb_relative_value) %>% unlist(.,use.names=F) %>% se()
+      #print(paste0(pop," feature ",r," std error is ",pop_se))
+      row_data <- cbind(pop,g,r,pop_mean,pop_se)
+      colnames(row_data) <- c("population","generation","ratio","avg_Pb_relative_value","se_Pb_relative_value")
+      average_relativised_pool_counts_copies_synR <- rbind(average_relativised_pool_counts_copies_synR,row_data,stringsAsFactors=F)
+    }
+  }
+}
+average_relativised_pool_counts_copies_synR$population = factor(average_relativised_pool_counts_copies_synR$population,levels=c("Pb","L01","L16","L27","L29","L31","L33","L34","L36","L38","L39","L42","L45","L48","L51","L52","L54","L59","L61","L63"))
+average_relativised_pool_counts_copies_synR$ratio = factor(average_relativised_pool_counts_copies_synR$ratio,levels=c("synonymous","missense","tolerated","deleterious","LoF"))
+average_relativised_pool_counts_copies_synR$generation <- as.factor(as.numeric(average_relativised_pool_counts_copies_synR$generation))
+average_relativised_pool_counts_copies_synR$avg_Pb_relative_value <- as.numeric(average_relativised_pool_counts_copies_synR$avg_Pb_relative_value)
+average_relativised_pool_counts_copies_synR$se_Pb_relative_value <- as.numeric(average_relativised_pool_counts_copies_synR$se_Pb_relative_value)
+average_relativised_pool_counts_copies_synR
+write_tsv(average_relativised_pool_counts_copies_synR,paste0(wd_path,"/pop_average_relativised_pool_counts_copies_synR_",type,".txt"))
+
+#Plot these means and standard errors:
+average_relativised_pool_counts_copies_synR_ggplot <- ggplot(data=filter(average_relativised_pool_counts_copies_synR,ratio!="synonymous"), aes(population,avg_Pb_relative_value)) +
+  #facet_wrap(feature ~ species,nrow=6,ncol=2,scales="free") +
+  facet_grid(. ~ ratio) +
+  geom_point(aes(colour=generation),alpha=0.5,size=2) +
+  #geom_errorbar(aes(ymin=avg_Pb_relative_value-se_Pb_relative_value, ymax=avg_Pb_relative_value+se_Pb_relative_value), position=position_dodge(), width=0.5) +
+  #ggtitle("Proportion of reads at different NM") +
+  ylab("Average derived count\n relative to synonymous and Pb-000") +
+  scale_y_continuous(breaks = seq(0.6, 1.2, by = 0.2)) +
+  ylim(0.5,1.4) +
+  ggtitle(paste0("Pools ",type)) +
+  #guides(colour="none") +
+  theme_bw() +
+  theme(text=element_text(size=12,face="bold"),
+        rect=element_rect(size=1),
+        axis.line=element_line(colour="black"),
+        axis.title=element_text(size=16),
+        axis.text=element_text(size=10,colour="black"),
+        axis.text.x=element_text(angle=90,hjust=1,vjust = 0.5,colour="black",size=10),
+        #axis.text.y=element_text(size=24,colour="black",margin=margin(t=0.5,unit="cm")),
+        #axis.title.y=element_text(size=30,margin=margin(r=0.5,unit="cm")),
+        panel.background=element_blank(),
+        panel.border=element_rect(colour="black"),
+        #panel.grid=element_blank(),
+        #panel.grid.major=element_line(colour="grey", linetype="dashed", size=0.4),
+        plot.margin=unit(c(0.5,1,0.5,0.5),"cm"),
+        #plot.title=element_text(size=36, face="bold", margin=margin(b=0.5, unit="cm")),
+        legend.background=element_rect(linetype="solid", colour="black", size=.5),
+        #legend.justification=c(0,0),
+        legend.key=element_rect(colour="white"),
+        #legend.key.size=unit(1.3,"cm"),
+        #legend.position="none",
+        legend.title=element_blank()
+  )
+average_relativised_pool_counts_copies_synR_ggplot
+ggsave(paste0("pop_average_relativised_pool_counts_copies_synR_",type,".pdf"), width=40, height=12, units="cm", device="pdf", path=wd_path)
+
+```
+
+#####Pools (separate):
+```{r Plot variant count results}
+
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+type <- "gen0-40" #gen0-40 #gen140
+subtype <- "Xchr" #all #autosomes #Xchr
+
+wd_path <- ("/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/")
+pool_counts <- read_tsv(paste0(wd_path,"counts_pool_",type,"_",subtype,"_summary.txt"))
+
+codes_dictionary <- read_tsv(paste0(wd_path,"pop_codes_dictionary.txt"),col_names=c("old","population"))
+pool_counts <- left_join(pool_counts,codes_dictionary,by=c("sample"="old")) %>% arrange(population)
+pool_counts$population = factor(pool_counts$population)
+
+pool_counts_copies_synR <- pool_counts %>% mutate(synonymous=synonymous_D/synonymous_D,missense=missense_D/synonymous_D,LoF=(stopgain_D+stoploss_D)/synonymous_D) %>% select(c(1,20:23)) %>% gather(ratio,value,-sample,-population,factor_key=T)
+pool_counts_copies_synR
+
+r_average_vector <- c()
+for (r in unique(pool_counts_copies_synR$ratio)) {
+  print(r)
+  r_average <- filter(pool_counts_copies_synR,r==ratio & population=="Pb-000") %>% select(value) %>% unlist(.,use.names=F) %>% mean()
+  r_average_vector <- c(r_average_vector,rep(r_average,nrow(filter(pool_counts_copies_synR,r==ratio))))
+}
+print(r_average_vector)
+
+relativised_pool_counts_copies_synR <- mutate(pool_counts_copies_synR, Pb_relative_value=value/r_average_vector)
+
+#Obtain per population averages and standard errors:
+se <- function(x) sqrt(var(x)/length(x)) #first define the standard error function
+
+average_relativised_pool_counts_copies_synR <- data_frame("population"=character(0),"ratio"=character(0),"avg_Pb_relative_value"=character(0),"se_Pb_relative_value"=character(0)) #next, create the empty dataframe
+
+for (pop in unique(relativised_pool_counts_copies_synR$population)) { #then loop over each population and feature to get the (relativised) mean and standard error, and feed the dataframe
+  print(pop)
+  #species <- filter(relativised_pool_counts_copies_synR,ratio==r & population==pop) %>% select(species) %>% unlist(.,use.names=F) %>% unique()
+  for (r in unique(relativised_pool_counts_copies_synR$ratio)) {
+    print(r)
+    pop_mean <- filter(relativised_pool_counts_copies_synR,ratio==r & population==pop) %>% select(Pb_relative_value) %>% unlist(.,use.names=F) %>% mean()
+    #print(paste0(pop," feature ",r," average is ",pop_mean))
+    pop_se <- filter(relativised_pool_counts_copies_synR,ratio==r & population==pop) %>% select(Pb_relative_value) %>% unlist(.,use.names=F) %>% se()
+    #print(paste0(pop," feature ",r," std error is ",pop_se))
+    row_data <- cbind(pop,r,pop_mean,pop_se)
+    colnames(row_data) <- c("population","ratio","avg_Pb_relative_value","se_Pb_relative_value")
+    average_relativised_pool_counts_copies_synR <- rbind(average_relativised_pool_counts_copies_synR,row_data,stringsAsFactors=F)
+  }
+}
+average_relativised_pool_counts_copies_synR$population = factor(average_relativised_pool_counts_copies_synR$population)
+average_relativised_pool_counts_copies_synR$ratio = factor(average_relativised_pool_counts_copies_synR$ratio,levels=c("synonymous","missense","LoF"))
+
+average_relativised_pool_counts_copies_synR$avg_Pb_relative_value <- as.numeric(average_relativised_pool_counts_copies_synR$avg_Pb_relative_value)
+average_relativised_pool_counts_copies_synR$se_Pb_relative_value <- as.numeric(average_relativised_pool_counts_copies_synR$se_Pb_relative_value)
+average_relativised_pool_counts_copies_synR
+write_tsv(average_relativised_pool_counts_copies_synR,paste0(wd_path,"/pop_average_relativised_pool_counts_copies_synR_",type,"_",subtype,".txt"))
+
+#Plot these means and standard errors:
+average_relativised_pool_counts_copies_synR_ggplot <- ggplot(data=filter(average_relativised_pool_counts_copies_synR,ratio!="synonymous"), aes(population,avg_Pb_relative_value,colour=population)) +
+  #facet_wrap(feature ~ species,nrow=6,ncol=2,scales="free") +
+  facet_grid(. ~ ratio) +
+  geom_point() +
+  #geom_errorbar(aes(ymin=avg_Pb_relative_value-se_Pb_relative_value, ymax=avg_Pb_relative_value+se_Pb_relative_value), position=position_dodge(), width=0.5) +
+  #ggtitle("Proportion of reads at different NM") +
+  ylab("Average derived count\n relative to synonymous and Pb-000") +
+  scale_y_continuous(breaks = seq(0.6, 1.2, by = 0.2)) +
+  ylim(0.5,1.2) +
+  ggtitle(paste0("Pools ",type," ",subtype)) +
+  theme_bw() +
+  theme(text=element_text(size=12,face="bold"),
+        rect=element_rect(size=1),
+        axis.line=element_line(colour="black"),
+        axis.title=element_text(size=16),
+        axis.text=element_text(size=10,colour="black"),
+        axis.text.x=element_text(angle=90,hjust=1,vjust = 0.5,colour="black",size=8),
+        #axis.text.y=element_text(size=24,colour="black",margin=margin(t=0.5,unit="cm")),
+        #axis.title.y=element_text(size=30,margin=margin(r=0.5,unit="cm")),
+        panel.background=element_blank(),
+        panel.border=element_rect(colour="black"),
+        #panel.grid=element_blank(),
+        #panel.grid.major=element_line(colour="grey", linetype="dashed", size=0.4),
+        plot.margin=unit(c(0.5,1,0.5,0.5),"cm"),
+        #plot.title=element_text(size=36, face="bold", margin=margin(b=0.5, unit="cm")),
+        legend.background=element_rect(linetype="solid", colour="black", size=.5),
+        #legend.justification=c(0,0),
+        legend.key=element_rect(colour="white"),
+        #legend.key.size=unit(1.3,"cm"),
+        legend.position="none",
+        legend.title=element_blank()
+  )
+average_relativised_pool_counts_copies_synR_ggplot
+ggsave(paste0("pop_average_relativised_pool_counts_copies_synR_",type,"_",subtype,".pdf"), width=15, height=12, units="cm", device="pdf", path=wd_path)
+
+```
+
+#####Pools Pb and line averages (Humberto version):
+```{r Plot variant count results}
+
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+type <- "all" #all #autosomes #Xchr
+
+wd_path <- ("/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/")
+pool_counts_gen0_40 <- read_tsv(paste0(wd_path,"counts_pool_gen0-40_",type,"_summary.txt")) %>% mutate(gen=ifelse(sample=="LBT0",000,ifelse(sample=="c1",005,ifelse(sample=="BT20",020,ifelse(sample=="BT30",030,040)))))
+pool_counts_gen140 <- read_tsv(paste0(wd_path,"counts_pool_gen140_",type,"_summary.txt")) %>% mutate(gen="140" %>% as.double)
+
+pool_counts <- rbind(pool_counts_gen0_40,pool_counts_gen140)
+
+codes_dictionary <- read_tsv(paste0(wd_path,"pop_codes_dictionary.txt"),col_names=c("old","population"))
+pool_counts <- left_join(pool_counts,codes_dictionary,by=c("sample"="old"))
+pool_counts$population = factor(pool_counts$population,levels=c("Pb","L01","L16","L27","L29","L31","L33","L34","L36","L38","L39","L42","L45","L48","L51","L52","L54","L59","L61","L63"))
+pool_counts$gen = factor(pool_counts$gen)
+pool_counts <- pool_counts %>% arrange(population,gen)
+
+pool_counts_copies_synR <- pool_counts %>% mutate(synonymous=synonymous_D/synonymous_D,missense=missense_D/synonymous_D,tolerated=tolerated_D/synonymous_D,deleterious=deleterious_D/synonymous_D,LoF=(stopgain_D+stoploss_D)/synonymous_D) %>% select(c(1,26:32)) %>% gather(ratio,value,-sample,-gen,-population,factor_key=T)
+pool_counts_copies_synR
+
+#pool_line_average_counts <- pool_counts %>% filter(population!="Pb") %>% group_by(gen) %>% summarise_if(is.numeric, mean, na.rm = TRUE) %>% mutate(population="lines")
+
+#pool_line_average_counts_copies_synR <- pool_line_average_counts %>% mutate(synonymous=synonymous_D/synonymous_D,missense=missense_D/synonymous_D,tolerated=tolerated_D/synonymous_D,deleterious=deleterious_D/synonymous_D,LoF=(stopgain_D+stoploss_D)/synonymous_D) %>% select(c(1,26:31)) %>% gather(ratio,value,-gen,-population,factor_key=T)
+#pool_line_average_counts_copies_synR
+
+r_average_vector <- c()
+for (r in unique(pool_counts_copies_synR$ratio)) {
+  print(r)
+  r_average <- filter(pool_counts_copies_synR,r==ratio & population=="Pb" & gen==0) %>% select(value) %>% unlist(.,use.names=F) %>% mean()
+  r_average_vector <- c(r_average_vector,rep(r_average,nrow(filter(pool_counts_copies_synR,r==ratio))))
+}
+print(r_average_vector)
+
+relativised_pool_counts_copies_synR <- mutate(pool_counts_copies_synR, Pb_relative_value=value/r_average_vector)
+
+#Obtain per population averages and standard errors:
+se <- function(x) sqrt(var(x)/length(x)) #first define the standard error function
+
+average_relativised_pool_counts_copies_synR <- data_frame("population"=character(0),"generation"=character(0),"ratio"=character(0),"avg_Pb_relative_value"=character(0),"se_Pb_relative_value"=character(0)) #next, create the empty dataframe
+
+for (pop in unique(relativised_pool_counts_copies_synR$population)) { #then loop over each population and feature to get the (relativised) mean and standard error, and feed the dataframe
+  print(pop)
+  for (g in unlist(unique(select(filter(relativised_pool_counts_copies_synR,population==pop),gen)),use.names=F)) {
+  #species <- filter(relativised_pool_counts_copies_synR,ratio==r & population==pop) %>% select(species) %>% unlist(.,use.names=F) %>% unique()
+    for (r in unique(relativised_pool_counts_copies_synR$ratio)) {
+      print(r)
+      pop_mean <- filter(relativised_pool_counts_copies_synR,ratio==r & gen==g & population==pop) %>% select(Pb_relative_value) %>% unlist(.,use.names=F) %>% mean()
+      #print(paste0(pop," feature ",r," average is ",pop_mean))
+      pop_se <- filter(relativised_pool_counts_copies_synR,ratio==r & gen==g & population==pop) %>% select(Pb_relative_value) %>% unlist(.,use.names=F) %>% se()
+      #print(paste0(pop," feature ",r," std error is ",pop_se))
+      row_data <- cbind(pop,g,r,pop_mean,pop_se)
+      colnames(row_data) <- c("population","generation","ratio","avg_Pb_relative_value","se_Pb_relative_value")
+      average_relativised_pool_counts_copies_synR <- rbind(average_relativised_pool_counts_copies_synR,row_data,stringsAsFactors=F)
+    }
+  }
+}
+average_relativised_pool_counts_copies_synR <- average_relativised_pool_counts_copies_synR %>% mutate(group=ifelse(population=="Pb","Pb","lines"))
+average_relativised_pool_counts_copies_synR$population = factor(average_relativised_pool_counts_copies_synR$population,levels=c("Pb","L01","L16","L27","L29","L31","L33","L34","L36","L38","L39","L42","L45","L48","L51","L52","L54","L59","L61","L63"))
+average_relativised_pool_counts_copies_synR$ratio = factor(average_relativised_pool_counts_copies_synR$ratio,levels=c("synonymous","missense","tolerated","deleterious","LoF"))
+average_relativised_pool_counts_copies_synR$generation <- as.factor(as.numeric(average_relativised_pool_counts_copies_synR$generation))
+average_relativised_pool_counts_copies_synR$avg_Pb_relative_value <- as.numeric(average_relativised_pool_counts_copies_synR$avg_Pb_relative_value)
+average_relativised_pool_counts_copies_synR$se_Pb_relative_value <- as.numeric(average_relativised_pool_counts_copies_synR$se_Pb_relative_value)
+average_relativised_pool_counts_copies_synR
+#write_tsv(average_relativised_pool_counts_copies_synR,paste0(wd_path,"/pop_average_relativised_pool_counts_copies_synR_",type,".txt"))
+
+
+#Humberto version (Pb):
+average_relativised_pool_counts_copies_synR_ggplot <- ggplot(data=filter(average_relativised_pool_counts_copies_synR,ratio!="synonymous" & population=="Pb" & generation!=5), aes(generation,avg_Pb_relative_value)) +
+  #facet_wrap(feature ~ species,nrow=6,ncol=2,scales="free") +
+  facet_grid(. ~ ratio) +
+  geom_point(aes(colour=generation),alpha=0.5,size=2) +
+  #geom_errorbar(aes(ymin=avg_Pb_relative_value-se_Pb_relative_value, ymax=avg_Pb_relative_value+se_Pb_relative_value), position=position_dodge(), width=0.5) +
+  #ggtitle("Proportion of reads at different NM") +
+  ylab("Average derived count\n relative to synonymous and Pb-000") +
+  scale_y_continuous(breaks = seq(0.6, 1.2, by = 0.2)) +
+  ylim(0.5,1.4) +
+  ggtitle(paste0("Pools ",type)) +
+  #guides(colour="none") +
+  theme_bw() +
+  theme(text=element_text(size=12,face="bold"),
+        rect=element_rect(size=1),
+        axis.line=element_line(colour="black"),
+        axis.title=element_text(size=16),
+        axis.text=element_text(size=10,colour="black"),
+        axis.text.x=element_text(angle=90,hjust=1,vjust = 0.5,colour="black",size=10),
+        #axis.text.y=element_text(size=24,colour="black",margin=margin(t=0.5,unit="cm")),
+        #axis.title.y=element_text(size=30,margin=margin(r=0.5,unit="cm")),
+        panel.background=element_blank(),
+        panel.border=element_rect(colour="black"),
+        #panel.grid=element_blank(),
+        #panel.grid.major=element_line(colour="grey", linetype="dashed", size=0.4),
+        plot.margin=unit(c(0.5,1,0.5,0.5),"cm"),
+        #plot.title=element_text(size=36, face="bold", margin=margin(b=0.5, unit="cm")),
+        legend.background=element_rect(linetype="solid", colour="black", size=.5),
+        #legend.justification=c(0,0),
+        legend.key=element_rect(colour="white"),
+        #legend.key.size=unit(1.3,"cm"),
+        legend.position="none",
+        legend.title=element_blank()
+  )
+average_relativised_pool_counts_copies_synR_ggplot
+ggsave(paste0("Pb_relativised_pool_counts_copies_synR_",type,"_Humberto_version.pdf"), width=20, height=12, units="cm", device="pdf", path=wd_path)
+
+#Humberto version (lines):
+average_relativised_pool_counts_copies_synR_ggplot <- ggplot(data=filter(average_relativised_pool_counts_copies_synR,ratio!="synonymous" & group=="lines"), aes(ratio,avg_Pb_relative_value)) +
+  #facet_wrap(feature ~ species,nrow=6,ncol=2,scales="free") +
+  #facet_grid(. ~ population) +
+  geom_boxplot(aes(colour=generation)) +
+  #geom_errorbar(aes(ymin=avg_Pb_relative_value-se_Pb_relative_value, ymax=avg_Pb_relative_value+se_Pb_relative_value), position=position_dodge(), width=0.5) +
+  #ggtitle("Proportion of reads at different NM") +
+  ylab("Average derived count\n relative to synonymous and Pb-000") +
+  scale_y_continuous(breaks = seq(0.7, 1.1, by = 0.2)) +
+  ylim(0.7,1.05) +
+  ggtitle(paste0("Pools ",type)) +
+  #guides(colour="none") +
+  theme_bw() +
+  theme(text=element_text(size=12,face="bold"),
+        rect=element_rect(size=1),
+        axis.line=element_line(colour="black"),
+        axis.title=element_text(size=16),
+        axis.text=element_text(size=10,colour="black"),
+        axis.text.x=element_text(angle=90,hjust=1,vjust = 0.5,colour="black",size=10),
+        #axis.text.y=element_text(size=24,colour="black",margin=margin(t=0.5,unit="cm")),
+        #axis.title.y=element_text(size=30,margin=margin(r=0.5,unit="cm")),
+        panel.background=element_blank(),
+        panel.border=element_rect(colour="black"),
+        #panel.grid=element_blank(),
+        #panel.grid.major=element_line(colour="grey", linetype="dashed", size=0.4),
+        plot.margin=unit(c(0.5,1,0.5,0.5),"cm"),
+        #plot.title=element_text(size=36, face="bold", margin=margin(b=0.5, unit="cm")),
+        legend.background=element_rect(linetype="solid", colour="black", size=.5),
+        #legend.justification=c(0,0),
+        legend.key=element_rect(colour="white"),
+        #legend.key.size=unit(1.3,"cm"),
+        #legend.position="none",
+        legend.title=element_blank()
+  )
+average_relativised_pool_counts_copies_synR_ggplot
+ggsave(paste0("lines_relativised_pool_counts_copies_synR_",type,"_Humberto_version.pdf"), width=15, height=12, units="cm", device="pdf", path=wd_path)
+
+
+```
+
+####Raw:
+#####Individuals:
+```{r Plot variant count results}
+
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+type <- "autosomes" #autosomes #Xchr
+
+wd_path <- ("/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/")
+individual_counts <- read_tsv(paste0(wd_path,"counts_individual_",type,"_summary.txt"))
+individual_counts <- mutate(individual_counts, population=gsub("-","",substr(sample,1,3)))
+individual_counts$population = factor(individual_counts$population)
+individual_counts$population <- gsub('Pb', 'Pb-140', individual_counts$population)
+
+
+individual_counts_copies_synR <- individual_counts %>% mutate(synonymous=synonymous_D/synonymous_D,missense=missense_D/synonymous_D,LoF=(stopgain_D+stoploss_D)/synonymous_D) %>% select(c(1,14:17)) %>% gather(ratio,value,-sample,-population,factor_key=T)
+individual_counts_copies_synR
+
+#Obtain per population averages and standard errors:
+se <- function(x) sqrt(var(x)/length(x)) #first define the standard error function
+
+average_individual_counts_copies_synR <- data_frame("population"=character(0),"ratio"=character(0),"avg_value"=character(0),"se_value"=character(0)) #next, create the empty dataframe
+
+for (pop in unique(individual_counts_copies_synR$population)) { #then loop over each population and feature to get the mean and standard error, and feed the dataframe
+  print(pop)
+  #species <- filter(relativised_individual_counts_copies_synR,ratio==r & population==pop) %>% select(species) %>% unlist(.,use.names=F) %>% unique()
+  for (r in unique(individual_counts_copies_synR$ratio)) {
+    print(r)
+    pop_mean <- filter(individual_counts_copies_synR,ratio==r & population==pop) %>% select(value) %>% unlist(.,use.names=F) %>% mean()
+    #print(paste0(pop," feature ",r," average is ",pop_mean))
+    pop_se <- filter(individual_counts_copies_synR,ratio==r & population==pop) %>% select(value) %>% unlist(.,use.names=F) %>% se()
+    #print(paste0(pop," feature ",r," std error is ",pop_se))
+    row_data <- cbind(pop,r,pop_mean,pop_se)
+    colnames(row_data) <- c("population","ratio","avg_value","se_value")
+    average_individual_counts_copies_synR <- rbind(average_individual_counts_copies_synR,row_data,stringsAsFactors=F)
+  }
+}
+average_individual_counts_copies_synR$population = factor(average_individual_counts_copies_synR$population)
+average_individual_counts_copies_synR$ratio = factor(average_individual_counts_copies_synR$ratio,levels=c("synonymous","missense","LoF"))
+
+average_individual_counts_copies_synR$avg_value <- as.numeric(average_individual_counts_copies_synR$avg_value)
+average_individual_counts_copies_synR$se_value <- as.numeric(average_individual_counts_copies_synR$se_value)
+average_individual_counts_copies_synR
+
+#Plot these means and standard errors:
+average_individual_counts_copies_synR_ggplot <- ggplot(data=filter(average_individual_counts_copies_synR,ratio!="synonymous"), aes(population,avg_value,colour=population)) +
+  #facet_wrap(feature ~ species,nrow=6,ncol=2,scales="free") +
+  facet_wrap(. ~ ratio, scales = "free") +
+  geom_point() +
+  geom_errorbar(aes(ymin=avg_value-se_value, ymax=avg_value+se_value), position=position_dodge(), width=0.5) +
+  #ggtitle("Proportion of reads at different NM") +
+  ylab("Average derived count \n relative to synonymous") +
+  #scale_y_continuous(breaks = seq(0.8, 1.6, by = 0.2)) +
+  #ylim(0.8,1.6) +
+  ggtitle(paste0("Individuals ",type)) +
+  theme_bw() +
+  theme(text=element_text(size=12,face="bold"),
+        rect=element_rect(size=1),
+        axis.line=element_line(colour="black"),
+        axis.title=element_text(size=16),
+        axis.text=element_text(size=10,colour="black"),
+        axis.text.x=element_text(angle=90,hjust=1,vjust = 0.5,colour="black",size=10),
+        #axis.text.y=element_text(size=24,colour="black",margin=margin(t=0.5,unit="cm")),
+        #axis.title.y=element_text(size=30,margin=margin(r=0.5,unit="cm")),
+        panel.background=element_blank(),
+        panel.border=element_rect(colour="black"),
+        #panel.grid=element_blank(),
+        #panel.grid.major=element_line(colour="grey", linetype="dashed", size=0.4),
+        plot.margin=unit(c(0.5,1,0.5,0.5),"cm"),
+        #plot.title=element_text(size=36, face="bold", margin=margin(b=0.5, unit="cm")),
+        legend.background=element_rect(linetype="solid", colour="black", size=.5),
+        #legend.justification=c(0,0),
+        legend.key=element_rect(colour="white"),
+        #legend.key.size=unit(1.3,"cm"),
+        legend.position="none",
+        legend.title=element_blank()
+  )
+average_individual_counts_copies_synR_ggplot
+ggsave(paste0("pop_average_raw_individual_counts_copies_synR_",type,".pdf"), width=15, height=12, units="cm", device="pdf", path=wd_path)
+
+```
+
+#####Pools Pb and line averages (Humberto version):
+```{r Plot variant count results}
+
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+type <- "all" #all #autosomes #Xchr
+
+wd_path <- ("/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/")
+pool_counts_gen0_40 <- read_tsv(paste0(wd_path,"counts_pool_gen0-40_",type,"_summary.txt")) %>% mutate(gen=ifelse(sample=="LBT0",000,ifelse(sample=="c1",005,ifelse(sample=="BT20",020,ifelse(sample=="BT30",030,040)))))
+pool_counts_gen140 <- read_tsv(paste0(wd_path,"counts_pool_gen140_",type,"_summary.txt")) %>% mutate(gen="140" %>% as.double)
+
+pool_counts <- rbind(pool_counts_gen0_40,pool_counts_gen140)
+
+codes_dictionary <- read_tsv(paste0(wd_path,"pop_codes_dictionary.txt"),col_names=c("old","population"))
+pool_counts <- left_join(pool_counts,codes_dictionary,by=c("sample"="old"))
+pool_counts$population = factor(pool_counts$population,levels=c("Pb","L01","L16","L27","L29","L31","L33","L34","L36","L38","L39","L42","L45","L48","L51","L52","L54","L59","L61","L63"))
+pool_counts$gen = factor(pool_counts$gen)
+pool_counts <- pool_counts %>% arrange(population,gen)
+
+pool_counts_copies_synR <- pool_counts %>% mutate(synonymous=synonymous_D/synonymous_D,missense=missense_D/synonymous_D,tolerated=tolerated_D/synonymous_D,deleterious=deleterious_D/synonymous_D,LoF=(stopgain_D+stoploss_D)/synonymous_D) %>% select(c(1,26:32)) %>% gather(ratio,value,-sample,-gen,-population,factor_key=T)
+pool_counts_copies_synR
+
+pool_counts_copies_synR <- pool_counts_copies_synR %>% mutate(group=ifelse(population=="Pb","Pb","lines"))
+pool_counts_copies_synR$population = factor(pool_counts_copies_synR$population,levels=c("Pb","L01","L16","L27","L29","L31","L33","L34","L36","L38","L39","L42","L45","L48","L51","L52","L54","L59","L61","L63"))
+pool_counts_copies_synR$ratio = factor(pool_counts_copies_synR$ratio,levels=c("synonymous","missense","tolerated","deleterious","LoF"))
+#write_tsv(average_relativised_pool_counts_copies_synR,paste0(wd_path,"/pop_average_relativised_pool_counts_copies_synR_",type,".txt"))
+
+#Humberto version (Pb):
+Pb_pool_counts_copies_synR_ggplot <- ggplot(data=filter(pool_counts_copies_synR,ratio!="synonymous" & population=="Pb" & gen!=5), aes(gen,value)) +
+  #facet_wrap(feature ~ species,nrow=6,ncol=2,scales="free") +
+  facet_wrap(. ~ ratio, scales = "free", nrow=1) +
+  geom_point(aes(colour=gen),alpha=0.5,size=2) +
+  #geom_errorbar(aes(ymin=avg_Pb_relative_value-se_Pb_relative_value, ymax=avg_Pb_relative_value+se_Pb_relative_value), position=position_dodge(), width=0.5) +
+  #ggtitle("Proportion of reads at different NM") +
+  ylab("Average derived count\n relative to synonymous") +
+  #scale_y_continuous(breaks = seq(0.6, 1.2, by = 0.2)) +
+  #ylim(0.5,1.4) +
+  ggtitle(paste0("Pools ",type)) +
+  #guides(colour="none") +
+  theme_bw() +
+  theme(text=element_text(size=12,face="bold"),
+        rect=element_rect(size=1),
+        axis.line=element_line(colour="black"),
+        axis.title=element_text(size=16),
+        axis.text=element_text(size=10,colour="black"),
+        axis.text.x=element_text(angle=90,hjust=1,vjust = 0.5,colour="black",size=10),
+        #axis.text.y=element_text(size=24,colour="black",margin=margin(t=0.5,unit="cm")),
+        #axis.title.y=element_text(size=30,margin=margin(r=0.5,unit="cm")),
+        panel.background=element_blank(),
+        panel.border=element_rect(colour="black"),
+        #panel.grid=element_blank(),
+        #panel.grid.major=element_line(colour="grey", linetype="dashed", size=0.4),
+        plot.margin=unit(c(0.5,1,0.5,0.5),"cm"),
+        #plot.title=element_text(size=36, face="bold", margin=margin(b=0.5, unit="cm")),
+        legend.background=element_rect(linetype="solid", colour="black", size=.5),
+        #legend.justification=c(0,0),
+        legend.key=element_rect(colour="white"),
+        #legend.key.size=unit(1.3,"cm"),
+        legend.position="none",
+        legend.title=element_blank()
+  )
+Pb_pool_counts_copies_synR_ggplot
+ggsave(paste0("Pb_pool_counts_copies_synR_",type,"_Humberto_version.pdf"), width=20, height=12, units="cm", device="pdf", path=wd_path)
+
+#Humberto version (lines):
+line_pool_counts_copies_synR_ggplot <- ggplot(data=filter(pool_counts_copies_synR,ratio!="synonymous" & group=="lines"), aes(ratio,value)) +
+  #facet_wrap(feature ~ species,nrow=6,ncol=2,scales="free") +
+  #facet_grid(. ~ population) +
+  geom_boxplot(aes(colour=gen)) +
+  #geom_errorbar(aes(ymin=avg_Pb_relative_value-se_Pb_relative_value, ymax=avg_Pb_relative_value+se_Pb_relative_value), position=position_dodge(), width=0.5) +
+  #ggtitle("Proportion of reads at different NM") +
+  ylab("Average derived count\n relative to synonymous") +
+  #scale_y_continuous(breaks = seq(0.7, 1.1, by = 0.2)) +
+  #ylim(0.7,1.05) +
+  ggtitle(paste0("Pools ",type)) +
+  #guides(colour="none") +
+  theme_bw() +
+  theme(text=element_text(size=12,face="bold"),
+        rect=element_rect(size=1),
+        axis.line=element_line(colour="black"),
+        axis.title=element_text(size=16),
+        axis.text=element_text(size=10,colour="black"),
+        axis.text.x=element_text(angle=90,hjust=1,vjust = 0.5,colour="black",size=10),
+        #axis.text.y=element_text(size=24,colour="black",margin=margin(t=0.5,unit="cm")),
+        #axis.title.y=element_text(size=30,margin=margin(r=0.5,unit="cm")),
+        panel.background=element_blank(),
+        panel.border=element_rect(colour="black"),
+        #panel.grid=element_blank(),
+        #panel.grid.major=element_line(colour="grey", linetype="dashed", size=0.4),
+        plot.margin=unit(c(0.5,1,0.5,0.5),"cm"),
+        #plot.title=element_text(size=36, face="bold", margin=margin(b=0.5, unit="cm")),
+        legend.background=element_rect(linetype="solid", colour="black", size=.5),
+        #legend.justification=c(0,0),
+        legend.key=element_rect(colour="white"),
+        #legend.key.size=unit(1.3,"cm"),
+        #legend.position="none",
+        legend.title=element_blank()
+  )
+line_pool_counts_copies_synR_ggplot
+ggsave(paste0("lines_pool_counts_copies_synR_",type,"_Humberto_version.pdf"), width=15, height=12, units="cm", device="pdf", path=wd_path)
+
+
+```
+
+###Relative to introns:
+####Relative to Pb:
+#####Individuals:
+```{r Plot variant count results}
+
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+type <- "autosomes" #autosomes #Xchr
+
+wd_path <- ("/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/")
+individual_counts <- read_tsv(paste0(wd_path,"counts_individual_",type,"_summary.txt"))
+individual_counts <- mutate(individual_counts, population=gsub("-","",substr(sample,1,3)))
+individual_counts$population = factor(individual_counts$population)
+individual_counts$population <- gsub('Pb', 'Pb-140', individual_counts$population)
+
+
+individual_counts_copies_intrR <- individual_counts %>% mutate(synonymous=synonymous_D/intronic_D,missense=missense_D/intronic_D,LoF=(stopgain_D+stoploss_D)/intronic_D) %>% select(c(1,14:17)) %>% gather(ratio,value,-sample,-population,factor_key=T)
+individual_counts_copies_intrR
+
+r_average_vector <- c()
+for (r in unique(individual_counts_copies_intrR$ratio)) {
+  print(r)
+  r_average <- filter(individual_counts_copies_intrR,r==ratio & population=="Pb-140") %>% select(value) %>% unlist(.,use.names=F) %>% mean()
+  r_average_vector <- c(r_average_vector,rep(r_average,nrow(filter(individual_counts_copies_intrR,r==ratio))))
+}
+print(r_average_vector)
+
+relativised_individual_counts_copies_intrR <- mutate(individual_counts_copies_intrR, Pb_relative_value=value/r_average_vector)
+
+#Obtain per population averages and standard errors:
+se <- function(x) sqrt(var(x)/length(x)) #first define the standard error function
+
+average_relativised_individual_counts_copies_intrR <- data_frame("population"=character(0),"ratio"=character(0),"avg_Pb_relative_value"=character(0),"se_Pb_relative_value"=character(0)) #next, create the empty dataframe
+
+for (pop in unique(relativised_individual_counts_copies_intrR$population)) { #then loop over each population and feature to get the (relativised) mean and standard error, and feed the dataframe
+  print(pop)
+  #species <- filter(relativised_individual_counts_copies_intrR,ratio==r & population==pop) %>% select(species) %>% unlist(.,use.names=F) %>% unique()
+  for (r in unique(relativised_individual_counts_copies_intrR$ratio)) {
+    print(r)
+    pop_mean <- filter(relativised_individual_counts_copies_intrR,ratio==r & population==pop) %>% select(Pb_relative_value) %>% unlist(.,use.names=F) %>% mean()
+    #print(paste0(pop," feature ",r," average is ",pop_mean))
+    pop_se <- filter(relativised_individual_counts_copies_intrR,ratio==r & population==pop) %>% select(Pb_relative_value) %>% unlist(.,use.names=F) %>% se()
+    #print(paste0(pop," feature ",r," std error is ",pop_se))
+    row_data <- cbind(pop,r,pop_mean,pop_se)
+    colnames(row_data) <- c("population","ratio","avg_Pb_relative_value","se_Pb_relative_value")
+    average_relativised_individual_counts_copies_intrR <- rbind(average_relativised_individual_counts_copies_intrR,row_data,stringsAsFactors=F)
+  }
+}
+average_relativised_individual_counts_copies_intrR$population = factor(average_relativised_individual_counts_copies_intrR$population)
+average_relativised_individual_counts_copies_intrR$ratio = factor(average_relativised_individual_counts_copies_intrR$ratio,levels=c("synonymous","missense","LoF"))
+
+average_relativised_individual_counts_copies_intrR$avg_Pb_relative_value <- as.numeric(average_relativised_individual_counts_copies_intrR$avg_Pb_relative_value)
+average_relativised_individual_counts_copies_intrR$se_Pb_relative_value <- as.numeric(average_relativised_individual_counts_copies_intrR$se_Pb_relative_value)
+average_relativised_individual_counts_copies_intrR
+write_tsv(average_relativised_individual_counts_copies_intrR,paste0(wd_path,"/pop_average_relativised_individual_counts_copies_intrR_",type,".txt"))
+
+#Plot these means and standard errors:
+average_relativised_individual_counts_copies_intrR_ggplot <- ggplot(data=average_relativised_individual_counts_copies_intrR, aes(population,avg_Pb_relative_value,colour=population)) +
+  #facet_wrap(feature ~ species,nrow=6,ncol=2,scales="free") +
+  facet_grid(. ~ ratio) +
+  geom_point() +
+  geom_errorbar(aes(ymin=avg_Pb_relative_value-se_Pb_relative_value, ymax=avg_Pb_relative_value+se_Pb_relative_value), position=position_dodge(), width=0.5) +
+  #ggtitle("Proportion of reads at different NM") +
+  ylab("Average derived count \n relative to introns and Pb-140") +
+  scale_y_continuous(breaks = seq(0.8, 1.6, by = 0.2)) +
+  ylim(0.8,1.6) +
+  ggtitle(paste0("Individuals ",type)) +
+  theme_bw() +
+  theme(text=element_text(size=12,face="bold"),
+        rect=element_rect(size=1),
+        axis.line=element_line(colour="black"),
+        axis.title=element_text(size=16),
+        axis.text=element_text(size=10,colour="black"),
+        axis.text.x=element_text(angle=90,hjust=1,vjust = 0.5,colour="black",size=10),
+        #axis.text.y=element_text(size=24,colour="black",margin=margin(t=0.5,unit="cm")),
+        #axis.title.y=element_text(size=30,margin=margin(r=0.5,unit="cm")),
+        panel.background=element_blank(),
+        panel.border=element_rect(colour="black"),
+        #panel.grid=element_blank(),
+        #panel.grid.major=element_line(colour="grey", linetype="dashed", size=0.4),
+        plot.margin=unit(c(0.5,1,0.5,0.5),"cm"),
+        #plot.title=element_text(size=36, face="bold", margin=margin(b=0.5, unit="cm")),
+        legend.background=element_rect(linetype="solid", colour="black", size=.5),
+        #legend.justification=c(0,0),
+        legend.key=element_rect(colour="white"),
+        #legend.key.size=unit(1.3,"cm"),
+        legend.position="none",
+        legend.title=element_blank()
+  )
+average_relativised_individual_counts_copies_intrR_ggplot
+ggsave(paste0("pop_average_relativised_individual_counts_copies_intrR_",type,".pdf"), width=21, height=12, units="cm", device="pdf", path=wd_path)
+
+```
+
+#####Pools:
+```{r Plot variant count results}
+
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+type <- "gen0-40" #gen0-40 #gen140
+subtype <- "all" #all #autosomes #Xchr
+
+wd_path <- ("/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/")
+pool_counts <- read_tsv(paste0(wd_path,"counts_pool_",type,"_",subtype,"_summary.txt"))
+
+codes_dictionary <- read_tsv(paste0(wd_path,"pop_codes_dictionary.txt"),col_names=c("old","population"))
+pool_counts <- left_join(pool_counts,codes_dictionary,by=c("sample"="old")) %>% arrange(population)
+pool_counts$population = factor(pool_counts$population)
+
+pool_counts_copies_intrR <- pool_counts %>% mutate(synonymous=synonymous_D/intronic_D,missense=missense_D/intronic_D,LoF=(stopgain_D+stoploss_D)/intronic_D) %>% select(c(1,20:23)) %>% gather(ratio,value,-sample,-population,factor_key=T)
+pool_counts_copies_intrR
+
+r_average_vector <- c()
+for (r in unique(pool_counts_copies_intrR$ratio)) {
+  print(r)
+  r_average <- filter(pool_counts_copies_intrR,r==ratio & population=="Pb-000") %>% select(value) %>% unlist(.,use.names=F) %>% mean()
+  r_average_vector <- c(r_average_vector,rep(r_average,nrow(filter(pool_counts_copies_intrR,r==ratio))))
+}
+print(r_average_vector)
+
+relativised_pool_counts_copies_intrR <- mutate(pool_counts_copies_intrR, Pb_relative_value=value/r_average_vector)
+
+#Obtain per population averages and standard errors:
+se <- function(x) sqrt(var(x)/length(x)) #first define the standard error function
+
+average_relativised_pool_counts_copies_intrR <- data_frame("population"=character(0),"ratio"=character(0),"avg_Pb_relative_value"=character(0),"se_Pb_relative_value"=character(0)) #next, create the empty dataframe
+
+for (pop in unique(relativised_pool_counts_copies_intrR$population)) { #then loop over each population and feature to get the (relativised) mean and standard error, and feed the dataframe
+  print(pop)
+  #species <- filter(relativised_pool_counts_copies_intrR,ratio==r & population==pop) %>% select(species) %>% unlist(.,use.names=F) %>% unique()
+  for (r in unique(relativised_pool_counts_copies_intrR$ratio)) {
+    print(r)
+    pop_mean <- filter(relativised_pool_counts_copies_intrR,ratio==r & population==pop) %>% select(Pb_relative_value) %>% unlist(.,use.names=F) %>% mean()
+    #print(paste0(pop," feature ",r," average is ",pop_mean))
+    pop_se <- filter(relativised_pool_counts_copies_intrR,ratio==r & population==pop) %>% select(Pb_relative_value) %>% unlist(.,use.names=F) %>% se()
+    #print(paste0(pop," feature ",r," std error is ",pop_se))
+    row_data <- cbind(pop,r,pop_mean,pop_se)
+    colnames(row_data) <- c("population","ratio","avg_Pb_relative_value","se_Pb_relative_value")
+    average_relativised_pool_counts_copies_intrR <- rbind(average_relativised_pool_counts_copies_intrR,row_data,stringsAsFactors=F)
+  }
+}
+average_relativised_pool_counts_copies_intrR$population = factor(average_relativised_pool_counts_copies_intrR$population)
+average_relativised_pool_counts_copies_intrR$ratio = factor(average_relativised_pool_counts_copies_intrR$ratio,levels=c("synonymous","missense","LoF"))
+
+average_relativised_pool_counts_copies_intrR$avg_Pb_relative_value <- as.numeric(average_relativised_pool_counts_copies_intrR$avg_Pb_relative_value)
+average_relativised_pool_counts_copies_intrR$se_Pb_relative_value <- as.numeric(average_relativised_pool_counts_copies_intrR$se_Pb_relative_value)
+average_relativised_pool_counts_copies_intrR
+write_tsv(average_relativised_pool_counts_copies_intrR,paste0(wd_path,"/pop_average_relativised_pool_counts_copies_intrR_",type,"_",subtype,".txt"))
+
+#Plot these means and standard errors:
+average_relativised_pool_counts_copies_intrR_ggplot <- ggplot(data=average_relativised_pool_counts_copies_intrR, aes(population,avg_Pb_relative_value,colour=population)) +
+  #facet_wrap(feature ~ species,nrow=6,ncol=2,scales="free") +
+  facet_grid(. ~ ratio) +
+  geom_point() +
+  #geom_errorbar(aes(ymin=avg_Pb_relative_value-se_Pb_relative_value, ymax=avg_Pb_relative_value+se_Pb_relative_value), position=position_dodge(), width=0.5) +
+  #ggtitle("Proportion of reads at different NM") +
+  ylab("Average derived count\n relative to introns and Pb-000") +
+  scale_y_continuous(breaks = seq(0.6, 1.6, by = 0.2)) +
+  ylim(0.7,1.7) +
+  ggtitle(paste0("Pools ",type," ",subtype)) +
+  theme_bw() +
+  theme(text=element_text(size=12,face="bold"),
+        rect=element_rect(size=1),
+        axis.line=element_line(colour="black"),
+        axis.title=element_text(size=16),
+        axis.text=element_text(size=10,colour="black"),
+        axis.text.x=element_text(angle=90,hjust=1,vjust = 0.5,colour="black",size=8),
+        #axis.text.y=element_text(size=24,colour="black",margin=margin(t=0.5,unit="cm")),
+        #axis.title.y=element_text(size=30,margin=margin(r=0.5,unit="cm")),
+        panel.background=element_blank(),
+        panel.border=element_rect(colour="black"),
+        #panel.grid=element_blank(),
+        #panel.grid.major=element_line(colour="grey", linetype="dashed", size=0.4),
+        plot.margin=unit(c(0.5,1,0.5,0.5),"cm"),
+        #plot.title=element_text(size=36, face="bold", margin=margin(b=0.5, unit="cm")),
+        legend.background=element_rect(linetype="solid", colour="black", size=.5),
+        #legend.justification=c(0,0),
+        legend.key=element_rect(colour="white"),
+        #legend.key.size=unit(1.3,"cm"),
+        legend.position="none",
+        legend.title=element_blank()
+  )
+average_relativised_pool_counts_copies_intrR_ggplot
+ggsave(paste0("pop_average_relativised_pool_counts_copies_intrR_",type,"_",subtype,".pdf"), width=21, height=12, units="cm", device="pdf", path=wd_path)
+
+```
+
+##Site ratios:
+###Relative to synonymous:
+####Raw:
+#####Individuals:
+```{r Plot variant count results}
+
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+type <- "autosomes" #autosomes #Xchr
+
+wd_path <- ("/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/")
+individual_counts <- read_tsv(paste0(wd_path,"counts_individual_",type,"_summary.txt"))
+individual_counts <- mutate(individual_counts, population=gsub("-","",substr(sample,1,3)))
+individual_counts$population = factor(individual_counts$population)
+individual_counts$population <- gsub('Pb', 'Pb-140', individual_counts$population)
+
+
+individual_counts_sites_synR <- individual_counts %>% mutate(synonymous=synonymous_V/synonymous_V,missense=missense_V/synonymous_V,LoF=(stopgain_V+stoploss_V)/synonymous_V) %>% select(c(1,14:17)) %>% gather(ratio,value,-sample,-population,factor_key=T)
+individual_counts_sites_synR
+
+#Obtain per population averages and standard errors:
+se <- function(x) sqrt(var(x)/length(x)) #first define the standard error function
+
+average_individual_counts_sites_synR <- data_frame("population"=character(0),"ratio"=character(0),"avg_value"=character(0),"se_value"=character(0)) #next, create the empty dataframe
+
+for (pop in unique(individual_counts_sites_synR$population)) { #then loop over each population and feature to get the mean and standard error, and feed the dataframe
+  print(pop)
+  #species <- filter(relativised_individual_counts_copies_synR,ratio==r & population==pop) %>% select(species) %>% unlist(.,use.names=F) %>% unique()
+  for (r in unique(individual_counts_sites_synR$ratio)) {
+    print(r)
+    pop_mean <- filter(individual_counts_sites_synR,ratio==r & population==pop) %>% select(value) %>% unlist(.,use.names=F) %>% mean()
+    #print(paste0(pop," feature ",r," average is ",pop_mean))
+    pop_se <- filter(individual_counts_sites_synR,ratio==r & population==pop) %>% select(value) %>% unlist(.,use.names=F) %>% se()
+    #print(paste0(pop," feature ",r," std error is ",pop_se))
+    row_data <- cbind(pop,r,pop_mean,pop_se)
+    colnames(row_data) <- c("population","ratio","avg_value","se_value")
+    average_individual_counts_sites_synR <- rbind(average_individual_counts_sites_synR,row_data,stringsAsFactors=F)
+  }
+}
+average_individual_counts_sites_synR$population = factor(average_individual_counts_sites_synR$population)
+average_individual_counts_sites_synR$ratio = factor(average_individual_counts_sites_synR$ratio,levels=c("synonymous","missense","LoF"))
+
+average_individual_counts_sites_synR$avg_value <- as.numeric(average_individual_counts_sites_synR$avg_value)
+average_individual_counts_sites_synR$se_value <- as.numeric(average_individual_counts_sites_synR$se_value)
+average_individual_counts_sites_synR
+
+#Plot these means and standard errors:
+average_individual_counts_sites_synR_ggplot <- ggplot(data=filter(average_individual_counts_sites_synR,ratio!="synonymous"), aes(population,avg_value,colour=population)) +
+  #facet_wrap(feature ~ species,nrow=6,ncol=2,scales="free") +
+  facet_wrap(. ~ ratio, scales = "free") +
+  geom_point() +
+  geom_errorbar(aes(ymin=avg_value-se_value, ymax=avg_value+se_value), position=position_dodge(), width=0.5) +
+  #ggtitle("Proportion of reads at different NM") +
+  ylab("Average number of sites with \n derived copies relative to synonymous") +
+  #scale_y_continuous(breaks = seq(0.8, 1.6, by = 0.2)) +
+  #ylim(0.8,1.6) +
+  ggtitle(paste0("Individuals ",type)) +
+  theme_bw() +
+  theme(text=element_text(size=12,face="bold"),
+        rect=element_rect(size=1),
+        axis.line=element_line(colour="black"),
+        axis.title=element_text(size=16),
+        axis.text=element_text(size=10,colour="black"),
+        axis.text.x=element_text(angle=90,hjust=1,vjust = 0.5,colour="black",size=10),
+        #axis.text.y=element_text(size=24,colour="black",margin=margin(t=0.5,unit="cm")),
+        #axis.title.y=element_text(size=30,margin=margin(r=0.5,unit="cm")),
+        panel.background=element_blank(),
+        panel.border=element_rect(colour="black"),
+        #panel.grid=element_blank(),
+        #panel.grid.major=element_line(colour="grey", linetype="dashed", size=0.4),
+        plot.margin=unit(c(0.5,1,0.5,0.5),"cm"),
+        #plot.title=element_text(size=36, face="bold", margin=margin(b=0.5, unit="cm")),
+        legend.background=element_rect(linetype="solid", colour="black", size=.5),
+        #legend.justification=c(0,0),
+        legend.key=element_rect(colour="white"),
+        #legend.key.size=unit(1.3,"cm"),
+        legend.position="none",
+        legend.title=element_blank()
+  )
+average_individual_counts_sites_synR_ggplot
+ggsave(paste0("pop_average_individual_counts_sites_synR_",type,".pdf"), width=15, height=12, units="cm", device="pdf", path=wd_path)
+
+```
+
+#####Pools:
+```{r Plot variant count results}
+
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+type <- "gen0-40" #gen0-40 #gen140
+subtype <- "Xchr" #all #autosomes #Xchr
+
+wd_path <- ("/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/")
+pool_counts <- read_tsv(paste0(wd_path,"counts_pool_",type,"_",subtype,"_summary.txt"))
+
+codes_dictionary <- read_tsv(paste0(wd_path,"pop_codes_dictionary.txt"),col_names=c("old","population"))
+pool_counts <- left_join(pool_counts,codes_dictionary,by=c("sample"="old")) %>% arrange(population)
+pool_counts$population = factor(pool_counts$population)
+
+pool_counts_sites_synR <- pool_counts %>% mutate(synonymous=synonymous_V/synonymous_V,missense=missense_V/synonymous_V,LoF=(stopgain_V+stoploss_V)/synonymous_V) %>% select(c(1,20:23)) %>% gather(ratio,value,-sample,-population,factor_key=T)
+pool_counts_sites_synR
+
+#Obtain per population averages and standard errors:
+se <- function(x) sqrt(var(x)/length(x)) #first define the standard error function
+
+average_pool_counts_sites_synR <- data_frame("population"=character(0),"ratio"=character(0),"avg_value"=character(0),"se_value"=character(0)) #next, create the empty dataframe
+
+for (pop in unique(pool_counts_sites_synR$population)) { #then loop over each population and feature to get the (relativised) mean and standard error, and feed the dataframe
+  print(pop)
+  #species <- filter(pool_counts_sites_synR,ratio==r & population==pop) %>% select(species) %>% unlist(.,use.names=F) %>% unique()
+  for (r in unique(pool_counts_sites_synR$ratio)) {
+    print(r)
+    pop_mean <- filter(pool_counts_sites_synR,ratio==r & population==pop) %>% select(value) %>% unlist(.,use.names=F) %>% mean()
+    #print(paste0(pop," feature ",r," average is ",pop_mean))
+    pop_se <- filter(pool_counts_sites_synR,ratio==r & population==pop) %>% select(value) %>% unlist(.,use.names=F) %>% se()
+    #print(paste0(pop," feature ",r," std error is ",pop_se))
+    row_data <- cbind(pop,r,pop_mean,pop_se)
+    colnames(row_data) <- c("population","ratio","avg_value","se_value")
+    average_pool_counts_sites_synR <- rbind(average_pool_counts_sites_synR,row_data,stringsAsFactors=F)
+  }
+}
+average_pool_counts_sites_synR$population = factor(average_pool_counts_sites_synR$population)
+average_pool_counts_sites_synR$ratio = factor(average_pool_counts_sites_synR$ratio,levels=c("synonymous","missense","LoF"))
+
+average_pool_counts_sites_synR$avg_value <- as.numeric(average_pool_counts_sites_synR$avg_value)
+average_pool_counts_sites_synR$se_value <- as.numeric(average_pool_counts_sites_synR$se_value)
+average_pool_counts_sites_synR
+
+#Plot these means and standard errors:
+average_pool_counts_sites_synR_ggplot <- ggplot(data=filter(average_pool_counts_sites_synR,ratio!="synonymous"), aes(population,avg_value,colour=population)) +
+  #facet_wrap(feature ~ species,nrow=6,ncol=2,scales="free") +
+  facet_wrap(. ~ ratio, scales = "free") +
+  geom_point() +
+  #geom_errorbar(aes(ymin=avg_Pb_relative_value-se_Pb_relative_value, ymax=avg_Pb_relative_value+se_Pb_relative_value), position=position_dodge(), width=0.5) +
+  #ggtitle("Proportion of reads at different NM") +
+  ylab("Average number of sites with\n derived copies relative to synonymous") +
+  #scale_y_continuous(breaks = seq(0.6, 1.2, by = 0.2)) +
+  #ylim(0.5,1.2) +
+  ggtitle(paste0("Pools ",type," ",subtype)) +
+  theme_bw() +
+  theme(text=element_text(size=12,face="bold"),
+        rect=element_rect(size=1),
+        axis.line=element_line(colour="black"),
+        axis.title=element_text(size=16),
+        axis.text=element_text(size=10,colour="black"),
+        axis.text.x=element_text(angle=90,hjust=1,vjust = 0.5,colour="black",size=8),
+        #axis.text.y=element_text(size=24,colour="black",margin=margin(t=0.5,unit="cm")),
+        #axis.title.y=element_text(size=30,margin=margin(r=0.5,unit="cm")),
+        panel.background=element_blank(),
+        panel.border=element_rect(colour="black"),
+        #panel.grid=element_blank(),
+        #panel.grid.major=element_line(colour="grey", linetype="dashed", size=0.4),
+        plot.margin=unit(c(0.5,1,0.5,0.5),"cm"),
+        #plot.title=element_text(size=36, face="bold", margin=margin(b=0.5, unit="cm")),
+        legend.background=element_rect(linetype="solid", colour="black", size=.5),
+        #legend.justification=c(0,0),
+        legend.key=element_rect(colour="white"),
+        #legend.key.size=unit(1.3,"cm"),
+        legend.position="none",
+        legend.title=element_blank()
+  )
+average_pool_counts_sites_synR_ggplot
+ggsave(paste0("pop_average_pool_counts_sites_synR_",type,"_",subtype,".pdf"), width=15, height=12, units="cm", device="pdf", path=wd_path)
+
+```
