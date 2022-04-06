@@ -243,8 +243,36 @@ bedtools subtract -a CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.vcf -b 
 ```
 
 ##Retrieve SNP coordinates of interest:
+###Polymorphic sites from the base population, gens 0, 20 and 30:
+```{R, engine='bash'}
+
+cd /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/
+
+#Gen 0:
+rm /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/gen0_allele_counts.txt
+grep -v '#' CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.DP_EM_filtered.vcf | cut -f1-2,4-5,12 | awk -F"\t|:|," '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$8+$10+$12,$9+$11+$13)}' > /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/gen0_allele_counts.txt
+grep -v '#' CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.DP_EM_filtered.vcf | cut -f1-2,4-5,12 | awk -F"\t|:|," '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$8+$10+$12,$9+$11+$13)}' >> /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/gen0_allele_counts.txt
+#Gen 20:
+rm /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/gen20_allele_counts.txt
+grep -v '#' CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.DP_EM_filtered.vcf | cut -f1-2,4-5,13 | awk -F"\t|:|," '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$8+$10+$12,$9+$11+$13)}' > /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/gen20_allele_counts.txt
+grep -v '#' CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.DP_EM_filtered.vcf | cut -f1-2,4-5,13 | awk -F"\t|:|," '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$8+$10+$12,$9+$11+$13)}' >> /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/gen20_allele_counts.txt
+#Gen 30:
+rm /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/gen30_allele_counts.txt
+grep -v '#' CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.DP_EM_filtered.vcf | cut -f1-2,4-5,14 | awk -F"\t|:|," '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$8+$10+$12,$9+$11+$13)}' > /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/gen30_allele_counts.txt
+grep -v '#' CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.DP_EM_filtered.vcf | cut -f1-2,4-5,14 | awk -F"\t|:|," '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$8+$10+$12,$9+$11+$13)}' >> /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/gen30_allele_counts.txt
+
+#Combine counts:
+cd /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/
+module load gcc/7.2.0
+module add gcc/7.2.0
+bedtools intersect -a <(bedtools intersect -a gen0_allele_counts.txt -b gen20_allele_counts.txt -wa -wb) -b gen30_allele_counts.txt -wa -wb | awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$6+$13+$20,$7+$14+$21)}' > final_snp_set.sum_gen0_gen20_gen30_allele_counts.bed
+
+```
+
 ###From all VCF files:
 ```{R, engine='bash'}
+
+#Obsolete, should be applied to the DP_EM_filtered VCFs!!
 
 cd /share/rdata/ramon.pouso/polarisation/
 rm all_VCF_list.txt
@@ -263,6 +291,8 @@ LANG=en_EN sort -k1,1 -k2,2n all_VCF_entries_raw.bed | uniq > all_VCF_entries_cu
 ###From gen0-40:
 ```{R, engine='bash'}
 
+#Obsolete, should be applied to the DP_EM_filtered VCFs!!
+
 cd /share/rdata/ramon.pouso/polarisation/
 rm gen0-40_VCF_list.txt
 find /share/rdata/ramon.pouso/POOLS/gen0-40/ -name '*masked.recode_snps.vcf' -print > gen0-40_VCF_list.txt
@@ -279,6 +309,8 @@ LANG=en_EN sort -k1,1 -k2,2n gen0-40_VCF_entries_raw.bed | uniq > gen0-40_VCF_en
 ###From all VCF files except for the gen0-40 ones:
 ```{R, engine='bash'}
 
+#Obsolete, should be applied to the DP_EM_filtered VCFs!!
+
 cd /share/rdata/ramon.pouso/polarisation/
 
 grep -v -f gen0-40_VCF_list.txt all_VCF_list.txt > except_gen0-40_VCF_list.txt
@@ -291,32 +323,6 @@ done < except_gen0-40_VCF_list.txt
 LANG=en_EN sort -k1,1 -k2,2n except_gen0-40_VCF_entries_raw.bed | uniq > except_gen0-40_VCF_entries_curated.bed
 
 bedtools subtract -a except_gen0-40_VCF_entries_curated.bed -b gen0-40_VCF_entries_curated.bed > snpsnotin_gen0-40_VCF_entries_curated.bed
-
-```
-
-###Polymorphic sites from the base population, gens 0, 20 and 30:
-```{R, engine='bash'}
-
-cd /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/
-
-#Gen 0:
-rm /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/gen0_allele_counts.txt
-grep -v '#' CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.DP_EM_filtered.vcf | cut -f1-2,4-5,12 | awk -F"\t|:|," '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$8+$10+$12,$9+$11+$13)}' > /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/gen0_allele_counts.txt
-grep -v '#' CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.DP_EM_filtered.vcf | cut -f1-2,4-5,12 | awk -F"\t|:|," '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$8+$10+$12,$9+$11+$13)}' >> /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/gen0_allele_counts.txt
-#Gen 20:
-rm /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/gen20_allele_counts.txt
-grep -v '#' CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.DP_EM_filtered.vcf | cut -f1-2,4-5,13 | awk -F"\t|:|," '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$8,$9,$10,$11,$12,$13)}' > /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/gen20_allele_counts.txt
-grep -v '#' CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.DP_EM_filtered.vcf | cut -f1-2,4-5,13 | awk -F"\t|:|," '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$8+$10+$12,$9+$11+$13)}' >> /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/gen20_allele_counts.txt
-#Gen 30:
-rm /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/gen30_allele_counts.txt
-grep -v '#' CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.DP_EM_filtered.vcf | cut -f1-2,4-5,14 | awk -F"\t|:|," '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$8,$9,$10,$11,$12,$13)}' > /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/gen30_allele_counts.txt
-grep -v '#' CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.DP_EM_filtered.vcf | cut -f1-2,4-5,14 | awk -F"\t|:|," '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$8+$10+$12,$9+$11+$13)}' >> /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/gen30_allele_counts.txt
-
-#Combine counts:
-cd /share/rdata/ramon.pouso/polarisation/estsfs/input_pipeline/
-module load gcc/7.2.0
-module add gcc/7.2.0
-bedtools intersect -a <(bedtools intersect -a gen0_allele_counts.txt -b gen20_allele_counts.txt -wa -wb) -b gen30_allele_counts.txt -wa -wb | awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$6+$13+$20,$7+$14+$21)}' > final_snp_set.sum_gen0_gen20_gen30_allele_counts.bed
 
 ```
 
@@ -520,7 +526,8 @@ module add gcc/7.2.0
 ##For melanogaster:
 bedtools getfasta -fi /share/rdata/ramon.pouso/reference/indexed_reference/dmel-all-chromosome-r6.14.fasta -bed /share/rdata/ramon.pouso/outgroups/orthologs/dmel_dsim_dyak_orthologs.db_coord_sorted_merged.bed -tab | awk -F"\t|:|-" '{printf ("%s\t%s\t%s\t%s\n", $1,$2,$3,$4)}' > dmel_dsim_dyak_orthologs.db_coord_sorted.melanogaster_state.intervals.bed
 
-#Check: total number of sites in the orthologous regions: 85919923
+#Check: total number of sites in the orthologous regions:
+#awk '{print $3-$2}' dmel_dsim_dyak_orthologs.db_coord_sorted.melanogaster_state.intervals.bed | paste -sd+ | bc #85919923
 
 ##For simulans:
 bedtools getfasta -fi /share/rdata/ramon.pouso/outgroups/simulans/3processed/bwa_simulans_iso_rmdup_mq30_rg_multirealigned_major.fasta -bed /share/rdata/ramon.pouso/outgroups/orthologs/dmel_dsim_dyak_orthologs.db_coord_sorted_merged.bed -tab | awk -F"\t|:|-" '{printf ("%s\t%s\t%s\t%s\n", $1,$2,$3,$4)}' > dmel_dsim_dyak_orthologs.db_coord_sorted.simulans_state.intervals.bed
@@ -1172,12 +1179,23 @@ while read -r SCAFFOLD START STOP ANCESTRAL REFERENCE; do
   OLD=$(grep "ID=$SCAFFOLD;" dmel-all-chromosome-r6.14.tab | awk -F"\t" '{printf ("%s\n", $2)}' | cut -c$STOP)
   NEW=$(grep "$SCAFFOLD" ancestral_dmel-all-chromosome-r6.14.tab | awk -F"\t" '{printf ("%s\n", $2)}' | cut -c$STOP)
   echo -e "$SCAFFOLD\t$STOP\t$REFERENCE\t$OLD\t$ANCESTRAL\t$NEW" >> kaka.borrar
- done < /share/rdata/ramon.pouso/polarisation/estsfs/output/final_snp_set.orthologs.sum_gen0_gen20_gen30_allele_counts.extrapolated_to_100.ancestral_vs_derived_complete.confident_inconsistent.rate6.pval.bed
+ done < /share/rdata/ramon.pouso/polarisation/estsfs/output/obsolete/final_snp_set.orthologs.sum_gen0_gen20_gen30_allele_counts.extrapolated_to_100.ancestral_vs_derived_complete.confident_inconsistent.rate6.pval.bed
 #Seems like all key positions have changed correctly, while random ones are still the same.
 
 ```
 
-#8. Polarize the VCFs.
+##Index the ancestral state fasta reference.
+```{bash}
+
+cd /share/rdata/ramon.pouso/reference/indexed_reference/
+module load samtools/1.4.1
+
+samtools faidx ancestral_dmel-all-chromosome-r6.14.fa
+samtools dict ancestral_dmel-all-chromosome-r6.14.fa -o ancestral_dmel-all-chromosome-r6.14.dict
+
+```
+
+#8. Polarise the VCFs.
 ##Obtain final VCFs.
 ###POOLS.
 ####Gens0-40:
@@ -1202,7 +1220,7 @@ bcftools reheader --samples sample_names.list CRISP_x/masked/crisp_multi_all_x_m
 /DATA/APPS/freebayes/25.03.19/SeqLib/htslib/bgzip -c CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.fixed_names.vcf > CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.fixed_names.vcf.gz
 /DATA/APPS/freebayes/25.03.19/SeqLib/htslib/tabix -p vcf CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.fixed_names.vcf.gz
 
-#Finally, concatenate both files:
+#Finally, concatenate both files and keep only the previously selected orthologous high confidence SNPs.
 bcftools concat CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.fixed_names.vcf.gz CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.fixed_names.vcf.gz | bedtools intersect -a stdin -b /share/rdata/ramon.pouso/polarisation/estsfs/output/final_snp_set.orthologs.sum_gen0_gen20_gen30_allele_counts.extrapolated_to_100.ancestral_vs_derived_complete.confident.rate6.pval.bed -header > crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.vcf
 
 #And edit some problematic spaces in the header (otherwise vcftools won't be able to deal with them later on):
@@ -1232,7 +1250,7 @@ bcftools reheader --samples sample_names.list crisp_all_gen140_x_masked.recode_s
 /DATA/APPS/freebayes/25.03.19/SeqLib/htslib/bgzip -c crisp_all_gen140_x_masked.recode_snps.fixed_names.vcf > crisp_all_gen140_x_masked.recode_snps.fixed_names.vcf.gz
 /DATA/APPS/freebayes/25.03.19/SeqLib/htslib/tabix -p vcf crisp_all_gen140_x_masked.recode_snps.fixed_names.vcf.gz
 
-#Finally, concatenate both files:
+#Finally, concatenate both files and keep only the previously selected orthologous high confidence SNPs.
 bcftools concat crisp_all_gen140_autosomic_masked.recode_snps.fixed_names.vcf.gz crisp_all_gen140_x_masked.recode_snps.fixed_names.vcf.gz | bedtools intersect -a stdin -b /share/rdata/ramon.pouso/polarisation/estsfs/output/final_snp_set.orthologs.sum_gen0_gen20_gen30_allele_counts.extrapolated_to_100.ancestral_vs_derived_complete.confident.rate6.pval.bed -header > crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.vcf
 
 #And edit some problematic spaces in the header (otherwise vcftools won't be able to deal with them later on):
@@ -1290,7 +1308,7 @@ cat $1 | fill-aa -a /share/rdata/ramon.pouso/reference/indexed_reference/ancestr
 
 module load bcftools/1.9 
 
-FILE=/share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.aafilled.vcf
+FILE=/share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/masked/crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.aafilled.vcf
 #/share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.aafilled.vcf #/share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/masked/crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.aafilled.vcf
 
 N_IND=$(bcftools query -l $FILE | wc -l)
@@ -1308,8 +1326,8 @@ for col in $(seq $N_FIRST $((N_FIRST+N_IND-1)))
 cat <(grep '#' $FILE) ${FILE/.vcf/.consistent.vcf} ${FILE/.vcf/.inconsistent.polarized.vcf} | bcftools sort > ${FILE/.aafilled.vcf/.polarized.vcf} 
 
 #Sanity checks:
-##No rows were dropped in the gens0-40 polarized file has X rows.
-##The gen140 polarized file has 830653 rows instead of 830657 because there were 4 SNPs with AA!=REF & AA!=ALT (a third allele), which were dropped.
+##No rows were dropped in the gens0-40 polarized file.
+##The gen140 polarized file has 853089 rows instead of 853373 because there were 284 SNPs with AA!=REF & AA!=ALT (a third allele), which were dropped. Check the number of dropped SNPs using: bedtools subtract -a crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.aafilled.vcf -b crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.polarized.vcf | wc -l
 
 ```
 
