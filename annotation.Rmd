@@ -154,7 +154,7 @@ table_annovar.pl ${FILE/.vcf/.annovar} /share/rdata/ramon.pouso/reference/indexe
 mv ${FILE/.vcf/.annovar}.dm6_multianno.vcf ${FILE/.vcf/.annovar}.dm6_multianno.tab
 awk -F"\t|;ANNOVAR_DATE" '{printf ("%s\t%s\t%s\tANNOVAR_DATE%s\n"),$1,$2-1,$3,$9}' ${FILE/.vcf/.annovar}.dm6_multianno.tab > ${FILE/.vcf/.annovar}.dm6_multianno.bed
 
-#Then intersect the polarized VCF with the annotated BED an edit it to obtain the annotated VCF:
+#Then intersect the polarized VCF with the annotated BED and edit it to obtain the annotated VCF:
 grep '^#' $FILE > ${FILE/.vcf/.annovar}.dm6_multianno.vcf
 bedtools intersect -a $FILE -b ${FILE/.vcf/.annovar}.dm6_multianno.bed -wb | awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s;%s\n"),$1,$2-1,$2,$3,$4,$5,$6,$7,$8,$NF}' | bedtools intersect -a stdin -b $FILE -wb | cut -f1,3-9,18- >> ${FILE/.vcf/.annovar}.dm6_multianno.vcf
 
@@ -202,7 +202,7 @@ table_annovar.pl ${FILE/.vcf/.annovar} /share/rdata/ramon.pouso/reference/indexe
 mv ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.vcf ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.tab
 awk -F"\t|;ANNOVAR_DATE" '{printf ("%s\t%s\t%s\tANNOVAR_DATE%s\n"),$1,$2-1,$3,$9}' ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.tab > ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.bed
 
-#Then intersect the polarized VCF with the annotated BED an edit it to obtain the annotated VCF:
+#Then intersect the polarized VCF with the annotated BED and edit it to obtain the annotated VCF:
 grep '^#' $FILE > ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.vcf
 bedtools intersect -a $FILE -b ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.bed -wb | awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s;%s\n"),$1,$2-1,$2,$3,$4,$5,$6,$7,$8,$NF}' | bedtools intersect -a stdin -b $FILE -wb | cut -f1,3-9,18- >> ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.vcf
 
@@ -225,8 +225,6 @@ table_annovar.pl $FILE /share/rdata/ramon.pouso/reference/indexed_reference/anno
 #2. Carry out SIFT annotation:
 ##Install the programme and download the database.
 ```{R, engine='bash'}
-
-!!!GENERATE NEW DB FOR THE ANCESTRAL GENOME USING:
 
 https://sift.bii.a-star.edu.sg/sift4g/SIFT4G_codes.html
 https://github.com/pauline-ng/SIFT4G_Create_Genomic_DB#DBfromGTF
@@ -346,15 +344,29 @@ sbatch make-SIFT-db-all.sh #But first store in make-SIFT-db-all.sh the following
 cd /mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/scripts_to_build_SIFT_db
 perl make-SIFT-db-all.pl -config /mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/scripts_to_build_SIFT_db/test_files/nr_ancestral_dm6.config.txt
 
+#I encountered this bug: https://github.com/rvaser/sift4g/issues/10 and edited the code as suggested here. However I kept running into the same problem until I realised that the programme doesn't remove the all_prot.fasta file, so it keeps appending the wrong sequences. Notwithstanding, even after manually removing it, I kept running into the alignment issues. So I posted a message in the linked issue, and followed rvaser's instructions over there.
 
-#I encountered this bug: https://github.com/rvaser/sift4g/issues/10 and edited the code as suggested here. However I kept running into the same problem until I realised that the programme doesn't remove the all_prot.fasta file, so it keeps appending the wrong sequences.
+#Since the first steps of the pipeline are working fine and don't need to be repeated, I downloaded https://github.com/pauline-ng/SIFT4G_Create_Genomic_DB/files/3877234/make-SIFT-db-starting_from_SIFT4G.pl.txt and used this script for subsequent attempts:
+sbatch make-SIFT-db-starting_from_SIFT4G.sh #But first store in make-SIFT-db-starting_from_SIFT4G.sh the following lines:
 
-#If it crashes again, download https://github.com/pauline-ng/SIFT4G_Create_Genomic_DB/files/3877234/make-SIFT-db-starting_from_SIFT4G.pl.txt and continue from there.
+#!/bin/bash
+#SBATCH -p shared --qos shared
+#SBATCH -n 2 --ntasks-per-node=1 --cpus-per-task=24
+#SBATCH -J make-SIFT-db-starting_from_SIFT4G
+#SBATCH -o make-SIFT-db-starting_from_SIFT4G_%A.out
+#SBATCH -t 24:00:00 # execution time
+#SBATCH --mail-type=TIME_LIMIT_80
+#SBATCH --mail-user=dkmanruiz@gmail.com
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/scripts_to_build_SIFT_db/
+perl make-SIFT-db-starting_from_SIFT4G.pl.txt -config /mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/scripts_to_build_SIFT_db/test_files/nr_ancestral_dm6.config.txt
+
+#Next I kept running into some extra errors while populating the databases, so I posted yet another issue: https://github.com/pauline-ng/SIFT4G_Create_Genomic_DB/issues/53 . According to Pauline, these error messages matter not.
 
 ```
 
 ##Run the programme:
-###sift4g_annotation.sh
+###dm6 database:
+####sift4g_annotation.sh
 ```{R, engine='bash'}
 
 #Run this from the proper directory as follows: qsub -cwd -l h=compute-0-9 /share/rdata/ramon.pouso/Scripts/sift4g_annotation.sh VCF (where VCF is the target VCF)
@@ -365,7 +377,7 @@ java -jar /share/rdata/ramon.pouso/sift4g/SIFT4G_Annotator_v2.4.jar –c -t -i $
 
 ```
 
-###Comments:
+####Comments:
 ```{R, engine='bash'}
 
 #Launch it as follows for each VCF:
@@ -381,6 +393,168 @@ qsub -cwd -l h=compute-0-9 /share/rdata/ramon.pouso/Scripts/sift4g_annotation.sh
 ##INDIVIDUALS, Xchr:
 cd /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/
 qsub -cwd -l h=compute-0-9 /share/rdata/ramon.pouso/Scripts/sift4g_annotation.sh Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.annovar.dm6_multianno.vcf
+
+```
+
+###Custom ancestral dm6 database:
+####Complete version:
+#####Upload the VCFs and the SIFT4G jar file to CESGA:
+```{R, engine='bash'}
+
+#In CESGA, create the destination folders:
+mkdir -p mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/annotation/pools_gen0-40/
+mkdir -p mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/annotation/pools_gen140/
+mkdir -p mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/annotation/individuals/
+
+#From the cluster, copy the following files:
+##POOLS, gens0-40:
+scp -p /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.polarized.annovar.dm6_multianno.vcf uvibgdkr@ft2.cesga.es://mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/annotation/pools_gen0-40/
+##POOLS, gen140:
+scp -p /share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/masked/crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.polarized.annovar.dm6_multianno.vcf uvibgdkr@ft2.cesga.es://mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/annotation/pools_gen140/
+##INDIVIDUALS, autosomic:
+scp -p /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.annovar.dm6_multianno.vcf uvibgdkr@ft2.cesga.es://mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/annotation/individuals/
+##INDIVIDUALS, Xchr:
+scp -p /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.annovar.dm6_multianno.vcf uvibgdkr@ft2.cesga.es://mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/annotation/individuals/
+##SIFT4G jar file:
+scp -p /share/rdata/ramon.pouso/sift4g/SIFT4G_Annotator_v2.4.jar uvibgdkr@ft2.cesga.es://mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/sift4g/
+
+```
+
+#####Annotate the files:
+```{R, engine='bash'}
+
+#Launch it as follows for each VCF (don't copy them from here to the terminal; invisible spaces will break it):
+##POOLS, gens0-40:
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/annotation/pools_gen0-40
+java -jar /mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/sift4g/SIFT4G_Annotator_v2.4.jar -c -t -i crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.polarized.annovar.dm6_multianno.vcf -d /mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/scripts_to_build_SIFT_db/test_files/nr_ancestral_dm6/nr_ancestral_dm6/ -r ./
+##POOLS, gen140:
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/annotation/pools_gen140
+java -jar /mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/sift4g/SIFT4G_Annotator_v2.4.jar -c -t -i crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.polarized.annovar.dm6_multianno.vcf -d /mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/scripts_to_build_SIFT_db/test_files/nr_ancestral_dm6/nr_ancestral_dm6/ -r ./
+##INDIVIDUALS, autosomic:
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/annotation/individuals
+java -jar /mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/sift4g/SIFT4G_Annotator_v2.4.jar -c -t -i Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.annovar.dm6_multianno.vcf -d /mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/scripts_to_build_SIFT_db/test_files/nr_ancestral_dm6/nr_ancestral_dm6/ -r ./
+##INDIVIDUALS, Xchr:
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/annotation/individuals
+java -jar /mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/sift4g/SIFT4G_Annotator_v2.4.jar -c -t -i Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.annovar.dm6_multianno.vcf -d /mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/scripts_to_build_SIFT_db/test_files/nr_ancestral_dm6/nr_ancestral_dm6/ -r ./
+
+```
+
+####nr version:
+#####Upload the VCFs and the SIFT4G jar file to CESGA:
+```{R, engine='bash'}
+
+#In CESGA, create the destination folders:
+mkdir -p mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/annotation/pools_gen0-40/
+mkdir -p mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/annotation/pools_gen140/
+mkdir -p mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/annotation/individuals/
+
+#From the cluster, copy the following files:
+##POOLS, gens0-40:
+scp -p /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.polarized.nr_annovar.dm6nr_multianno.vcf uvibgdkr@ft2.cesga.es://mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/annotation/pools_gen0-40/
+##POOLS, gen140:
+scp -p /share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/masked/crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.polarized.nr_annovar.dm6nr_multianno.vcf uvibgdkr@ft2.cesga.es://mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/annotation/pools_gen140/
+##INDIVIDUALS, autosomic:
+scp -p /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.nr_annovar.dm6nr_multianno.vcf uvibgdkr@ft2.cesga.es://mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/annotation/individuals/
+##INDIVIDUALS, Xchr:
+scp -p /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.nr_annovar.dm6nr_multianno.vcf uvibgdkr@ft2.cesga.es://mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/annotation/individuals/
+##SIFT4G jar file:
+scp -p /share/rdata/ramon.pouso/sift4g/SIFT4G_Annotator_v2.4.jar uvibgdkr@ft2.cesga.es://mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/sift4g/
+
+```
+
+#####Annotate the files:
+```{R, engine='bash'}
+
+#Launch it as follows for each VCF (don't copy them from here to the terminal; invisible spaces will break it):
+##POOLS, gens0-40:
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/annotation/pools_gen0-40
+java -jar /mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/sift4g/SIFT4G_Annotator_v2.4.jar -c -t -i crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.polarized.nr_annovar.dm6nr_multianno.vcf -d /mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/scripts_to_build_SIFT_db/test_files/nr_ancestral_dm6/nr_ancestral_dm6/ -r ./
+##POOLS, gen140:
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/annotation/pools_gen140
+java -jar /mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/sift4g/SIFT4G_Annotator_v2.4.jar -c -t -i crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.polarized.nr_annovar.dm6nr_multianno.vcf -d /mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/scripts_to_build_SIFT_db/test_files/nr_ancestral_dm6/nr_ancestral_dm6/ -r ./
+##INDIVIDUALS, autosomic:
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/annotation/individuals
+java -jar /mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/sift4g/SIFT4G_Annotator_v2.4.jar -c -t -i Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.nr_annovar.dm6nr_multianno.vcf -d /mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/scripts_to_build_SIFT_db/test_files/nr_ancestral_dm6/nr_ancestral_dm6/ -r ./
+##INDIVIDUALS, Xchr:
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/annotation/individuals
+java -jar /mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/sift4g/SIFT4G_Annotator_v2.4.jar -c -t -i Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.nr_annovar.dm6nr_multianno.vcf -d /mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/scripts_to_build_SIFT_db/test_files/nr_ancestral_dm6/nr_ancestral_dm6/ -r ./
+
+```
+
+#####Download the VCFs from CESGA:
+```{R, engine='bash'}
+
+#From the cluster, copy the following files:
+##POOLS, gens0-40:
+scp -p uvibgdkr@ft2.cesga.es://mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/annotation/pools_gen0-40/crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.polarized.nr_annovar.dm6nr_multianno_SIFTpredictions.vcf /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/
+##POOLS, gen140:
+scp -p uvibgdkr@ft2.cesga.es://mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/annotation/pools_gen140/crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.polarized.nr_annovar.dm6nr_multianno_SIFTpredictions.vcf /share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/masked/
+##INDIVIDUALS, autosomic:
+scp -p uvibgdkr@ft2.cesga.es://mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/annotation/individuals/Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.nr_annovar.dm6nr_multianno_SIFTpredictions.vcf /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/
+##INDIVIDUALS, Xchr:
+scp -p uvibgdkr@ft2.cesga.es://mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/annotation/individuals/Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.nr_annovar.dm6nr_multianno_SIFTpredictions.vcf /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/
+
+```
+
+##Analyse the output:
+```{bash}
+
+#It's important to select the relevant annotation per site when there is more than one. Extract the name of the gene from the annovar part, then also from the sift part, and keep only the matching one!
+TYPE="POOLS" #POOLS #INDIVIDUOS
+SUBTYPE="gen0-40" #"gen0-40" #gen140 #autosomes #Xchr
+if [ $TYPE == "POOLS" ] && [ $SUBTYPE == "gen0-40" ]
+  then
+  cd /share/rdata/ramon.pouso/$TYPE/$SUBTYPE/$SUBTYPE/5variants/multirealigned/
+  VCF=crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.polarized.nr_annovar.dm6nr_multianno_SIFTpredictions.vcf
+elif [ $TYPE == "POOLS" ] && [ $SUBTYPE == "gen140" ]
+  then
+  cd /share/rdata/ramon.pouso/$TYPE/$SUBTYPE/$SUBTYPE/6variants/masked/
+  VCF=crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.polarized.nr_annovar.dm6nr_multianno_SIFTpredictions.vcf
+elif [ $TYPE == "INDIVIDUOS" ] && [ $SUBTYPE == "autosomes" ]
+  then
+  cd /share/rdata/ramon.pouso/$TYPE/gen40/gen40/6variants/
+  VCF=Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.nr_annovar.dm6nr_multianno_SIFTpredictions.vcf
+elif [ $TYPE == "INDIVIDUOS" ] && [ $SUBTYPE == "Xchr" ]
+  then
+  cd /share/rdata/ramon.pouso/$TYPE/gen40/gen40/6variants/
+  VCF=Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.nr_annovar.dm6nr_multianno_SIFTpredictions.vcf
+fi
+
+#One entry:
+grep -v '^#' $VCF | grep 'nonsynonymous_SNV' | grep 'SIFT' | awk '!($5 ~ ",")' | awk -F";Gene\\\\.refGene=|;GeneDetail\\\\.refGene=|;AAChange\\\\.refGene=|;ALLELE_END|;SIFTINFO=|\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$9,$11,$13)}' | awk 'BEGIN{FS=OFS="\t"} {gsub(":","_", $4);gsub("\\(","_");gsub("\\)","_");print}' | awk -F"\t|:" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$10)}' | grep -v "," | less -S  > ${VCF/.vcf/.clean.txt}
+#Multiple entries:
+grep -v '^#' $VCF | grep 'nonsynonymous_SNV' | grep 'SIFT' | awk '!($5 ~ ",")' | awk -F";Gene\\\\.refGene=|;GeneDetail\\\\.refGene=|;AAChange\\\\.refGene=|;ALLELE_END|;SIFTINFO=|\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$9,$11,$13)}' | awk 'BEGIN{FS=OFS="\t"} {gsub(":","_", $4);gsub("\\(","_");gsub("\\)","_");print}' | awk -F"\t|:" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$10)}' | grep "," | sed 's/,/\t/g' | awk '{for(i=6;i<=NF;i++){if($i ~ $5){printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$i)}}}' >> ${VCF/.vcf/.clean.txt}
+
+#Classify the mutations in deleterious and tolerated categories:
+module load gcc/7.2.0
+module add gcc/7.2.0
+grep "DELETERIOUS" ${VCF/.vcf/.clean.txt} | bedtools sort > ${TYPE}_${SUBTYPE}_missense_variants_SIFT_scores_deleterious.bed #14249 (23.1% of the total 61736) for pools gen0-40
+grep "TOLERATED" ${VCF/.vcf/.clean.txt} | bedtools sort > ${TYPE}_${SUBTYPE}_missense_variants_SIFT_scores_tolerated.bed #47487 (76.9% of the total 61736) for pools gen0-40
+
+#Check genes with parentheses:
+#grep -v '^#' $VCF | grep 'synonymous_SNV' | grep 'SIFT' | awk -F";Gene\\\\.refGene=|;GeneDetail\\\\.refGene=|;AAChange\\\\.refGene=|;ALLELE_END|;SIFTINFO=|\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$9,$11,$13)}' | awk -F"\t" '{gsub(/:/,"_", $4); print}' | awk -F"\t|:" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$10)}' | awk '$5 ~ "\\("' | grep "," | sed 's/,/\t/g' | awk -F"\t" '{gsub("\\(","_");gsub("\\)","_");print}' | awk '{for(i=6;i<=NF;i++){if($i ~ $5){printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$i)}}}' | less -S
+
+#Check consistency between VCFs from both pools:
+##Both deleterious:
+bedtools intersect -a /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/POOLS_gen0-40_missense_variants_SIFT_scores_deleterious.bed -b /share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/masked/POOLS_gen140_missense_variants_SIFT_scores_deleterious.bed | wc -l #11536
+#Both tolerated:
+bedtools intersect -a /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/POOLS_gen0-40_missense_variants_SIFT_scores_tolerated.bed -b /share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/masked/POOLS_gen140_missense_variants_SIFT_scores_tolerated.bed | wc -l #41617
+##Deleterious in gen0-40, tolerated in gen 140:
+bedtools intersect -a /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/POOLS_gen0-40_missense_variants_SIFT_scores_deleterious.bed -b /share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/masked/POOLS_gen140_missense_variants_SIFT_scores_tolerated.bed | wc -l #1
+##Tolerated in gen0-40, deleterious in gen 140:
+bedtools intersect -a /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/POOLS_gen0-40_missense_variants_SIFT_scores_tolerated.bed -b /share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/masked/POOLS_gen140_missense_variants_SIFT_scores_deleterious.bed | wc -l #0
+#Looks good.
+
+#Check consistency between VCFs from pools gen0-40 and individuals (autosomes only):
+##Both deleterious:
+bedtools intersect -a /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/POOLS_gen0-40_missense_variants_SIFT_scores_deleterious.bed -b /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/INDIVIDUOS_autosomes_missense_variants_SIFT_scores_deleterious.bed | wc -l #9516
+#Both tolerated:
+bedtools intersect -a /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/POOLS_gen0-40_missense_variants_SIFT_scores_tolerated.bed -b /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/INDIVIDUOS_autosomes_missense_variants_SIFT_scores_tolerated.bed | wc -l #34452
+##Deleterious in pools gen0-40, tolerated in individuals gen 140:
+bedtools intersect -a /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/POOLS_gen0-40_missense_variants_SIFT_scores_deleterious.bed -b /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/INDIVIDUOS_autosomes_missense_variants_SIFT_scores_tolerated.bed | wc -l #0
+##Tolerated in pools gen0-40, deleterious in individuals gen 140:
+bedtools intersect -a /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/POOLS_gen0-40_missense_variants_SIFT_scores_tolerated.bed -b /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/INDIVIDUOS_autosomes_missense_variants_SIFT_scores_deleterious.bed | wc -l #1
+#Looks good.
 
 ```
 
@@ -672,7 +846,7 @@ BLASTDBCMD="/mnt/lustre/scratch/home/uvi/bg/dkr/ncbi-blast-2.4.0+/bin/blastdbcmd
 ```{bash}
 
 cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation
-ls genes_fasta/*.fa | awk -F"genes_fasta/|.fa" '{print $2}' > gene_list.txt
+ls genes_fasta/*.fa | awk -F"genes_fasta/|\\\\.fa" '{print $2}' > gene_list.txt
 mkdir -p provean_output
 mkdir -p genes_support
 
@@ -703,7 +877,8 @@ sed -n "${START},${TOTAL}p" $FILENAME > ${FILENAME/.txt/.chunk_${i}.txt}
 
 ```
 
-####parallel_provean.sh
+####Scripts:
+#####fatnode: parallel_provean.sh
 ```{bash}
 
 #!/bin/bash
@@ -711,7 +886,7 @@ sed -n "${START},${TOTAL}p" $FILENAME > ${FILENAME/.txt/.chunk_${i}.txt}
 #SBATCH -J provean_parallel
 #SBATCH -o provean_parallel.%A.chunk_%a.out
 #SBATCH -t 100:00:00              # Run time (hh:mm:ss)
-#SBATCH -c 10
+#SBATCH -c 16
 #SBATCH --mem-per-cpu=10GB
 #SBATCH --mail-type=TIME_LIMIT_80
 #SBATCH --mail-user=dkmanruiz@gmail.com
@@ -726,8 +901,51 @@ TOTAL=$(wc -l < ${FILENAME/.txt/.chunk_${SLURM_ARRAY_TASK_ID}.txt})
 COUNTER=0
 
 while read -r GENE; do
-  echo "Processing gene $GENE"
-  /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/provean.sh --num_threads $SLURM_CPUS_PER_TASK -q genes_fasta/"$GENE".fa -v genes_variants/"$GENE".var --save_supporting_set genes_support/"$GENE".sss > provean_output/"$GENE".provean
+  if [ ! -f provean_output/${GENE}.provean ]
+    then
+    echo "Processing gene $GENE"
+    /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/provean.sh --num_threads $SLURM_CPUS_PER_TASK -q genes_fasta/"$GENE".fa -v genes_variants/"$GENE".var --save_supporting_set genes_support/"$GENE".sss > provean_output/"$GENE".provean
+    else
+    echo "$GENE already processed"
+  fi
+  ((COUNTER++))
+  if [ $(( $COUNTER % 10 )) == 0 ]
+    then
+    echo "Processed $COUNTER genes out of $TOTAL"
+  fi
+  done < ${FILENAME/.txt/.chunk_${SLURM_ARRAY_TASK_ID}.txt}
+
+```
+
+#####shared: parallel_provean_shared.sh
+```{bash}
+
+#!/bin/bash
+#SBATCH -p shared --qos shared
+#SBATCH -J provean_parallel
+#SBATCH -o provean_parallel.%A.chunk_%a.out
+#SBATCH -t 100:00:00              # Run time (hh:mm:ss)
+#SBATCH -c 16
+#SBATCH --mail-type=TIME_LIMIT_80
+#SBATCH --mail-user=dkmanruiz@gmail.com
+
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation
+module load gcccore/system provean/1.1.5
+
+# Retrieve files:
+FILENAME=gene_list.txt
+echo "Running provean; chunk number" ${SLURM_ARRAY_TASK_ID}
+TOTAL=$(wc -l < ${FILENAME/.txt/.chunk_${SLURM_ARRAY_TASK_ID}.txt})
+COUNTER=0
+
+while read -r GENE; do
+  if [ ! -f provean_output/${GENE}.provean ]
+    then
+    echo "Processing gene $GENE"
+    /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/provean.sh --num_threads $SLURM_CPUS_PER_TASK -q genes_fasta/"$GENE".fa -v genes_variants/"$GENE".var --save_supporting_set genes_support/"$GENE".sss > provean_output/"$GENE".provean
+    else
+    echo "$GENE already processed"
+  fi
   ((COUNTER++))
   if [ $(( $COUNTER % 10 )) == 0 ]
     then
@@ -738,11 +956,25 @@ while read -r GENE; do
 ```
 
 ####Send the array-job:
+#####fatnode:
 ```{bash}
 
 cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation
 PARALLEL=20 #define the desired value (same as in the "Choose the partition number" section):
 sbatch --array=1-$PARALLEL /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/parallel_provean.sh
+
+#sbatch --array=10,20 /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/parallel_provean.sh #For listing specific chunks, use a comma.
+
+```
+
+#####shared:
+```{bash}
+
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation
+PARALLEL=20 #define the desired value (same as in the "Choose the partition number" section):
+sbatch --array=1-$PARALLEL /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/parallel_provean_shared.sh
+
+#sbatch --array=10,20 /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/parallel_provean_shared.sh #For listing specific chunks, use a comma.
 
 ```
 
@@ -753,7 +985,7 @@ sbatch --array=1-$PARALLEL /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotatio
 #Once all chunks of a particular job have finished, run this script to retrieve the list of genes which could not be processed before the queue finished, and group them in new input blocks:
 
 cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation
-JOB_ID=7948007 #Introduce the finished job id.
+JOB_ID=7990233 #Introduce the finished job id.
 START=1 #Introduce the first chunk.
 END=10 #Introduce the last chunk.
 PARALLEL=10 #define the number of new partitions.
@@ -762,6 +994,170 @@ rm provean_parallel.$JOB_ID.chunk_${START}_to_chunk_${END}.remaining.out
 for ((i=START; i<=END; i++))
   do
   ls provean_parallel.$JOB_ID.chunk_${i}.out >> provean_parallel.$JOB_ID.chunk_${START}_to_chunk_${END}.remaining.out
+  done
+
+GENE_LISTS=$(cat provean_parallel.$JOB_ID.chunk_${START}_to_chunk_${END}.remaining.out)
+for gene_list in ${GENE_LISTS[@]}
+  do
+  if grep -q "TIME LIMIT" $gene_list; then
+    INTERRUPTED_GENE=$(grep "Processing gene" $gene_list | tail -n1 | cut -d' ' -f3)
+    echo "removing interrupted $INTERRUPTED_GENE.provean from $gene_list"
+    #rm provean_output/$INTERRUPTED_GENE.provean
+    fi
+  done
+
+rm gene_list.chunk_${START}_to_chunk_${END}.remaining.txt
+for ((i=START; i<=END; i++))
+  do
+  while read -r GENE
+    do
+    if [ ! -f provean_output/${GENE}.provean ]
+      then
+      echo $GENE
+      echo ${GENE} >> gene_list.chunk_${START}_to_chunk_${END}.remaining.txt
+    fi
+    done < gene_list.chunk_${i}.txt
+  done
+
+FILENAME=gene_list.chunk_${START}_to_chunk_${END}.remaining.txt
+TOTAL=$(wc -l < $FILENAME)
+BLOCK_SIZE=$(echo "scale=0; $TOTAL/$PARALLEL" | bc)
+for ((i=1; i<PARALLEL; i++))
+  do
+  START=$((((i-1))*BLOCK_SIZE+1))
+  echo $START
+  END=$((BLOCK_SIZE*i))
+  echo $END
+  sed -n "${START},${END}p" $FILENAME > ${FILENAME/.txt/.chunk_${i}.txt}
+  done
+START=$((((i-1))*BLOCK_SIZE+1))
+echo $START
+echo $TOTAL
+sed -n "${START},${TOTAL}p" $FILENAME > ${FILENAME/.txt/.chunk_${i}.txt}
+
+```
+
+#####Scripts:
+######fatnode: parallel_provean_remaining_fat.sh
+```{bash}
+
+#!/bin/bash
+#SBATCH -p fatnode
+#SBATCH -J provean_parallel_remaining
+#SBATCH -o provean_parallel_remaining.%A.chunk_%a.out
+#SBATCH -t 100:00:00              # Run time (hh:mm:ss)
+#SBATCH -c 10
+#SBATCH --mem-per-cpu=10GB
+#SBATCH --mail-type=TIME_LIMIT_80
+#SBATCH --mail-user=dkmanruiz@gmail.com
+
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation
+module load gcccore/system provean/1.1.5
+
+#Retrieve files:
+FILENAME=$1
+echo "Running provean; chunk number" ${SLURM_ARRAY_TASK_ID}
+TOTAL=$(wc -l < ${FILENAME/.txt/.chunk_${SLURM_ARRAY_TASK_ID}.txt})
+COUNTER=0
+
+while read -r GENE; do
+  if [ ! -f provean_output/${GENE}.provean ]
+    then
+    echo "Processing gene $GENE"
+    /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/provean.sh --num_threads $SLURM_CPUS_PER_TASK -q genes_fasta/"$GENE".fa -v genes_variants/"$GENE".var --save_supporting_set genes_support/"$GENE".sss > provean_output/"$GENE".provean
+    else
+    echo "$GENE already processed"
+  fi
+  ((COUNTER++))
+  if [ $(( $COUNTER % 10 )) == 0 ]
+    then
+    echo "Processed $COUNTER genes out of $TOTAL"
+  fi
+  done < ${FILENAME/.txt/.chunk_${SLURM_ARRAY_TASK_ID}.txt}
+
+```
+
+######shared: parallel_provean_remaining_shared.sh
+```{bash}
+
+#!/bin/bash
+#SBATCH -p shared --qos shared
+#SBATCH -J provean_parallel_remaining
+#SBATCH -o provean_parallel_remaining.%A.chunk_%a.out
+#SBATCH -t 100:00:00              # Run time (hh:mm:ss)
+#SBATCH -c 12
+#SBATCH --mail-type=TIME_LIMIT_80
+#SBATCH --mail-user=dkmanruiz@gmail.com
+
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation
+module load gcccore/system provean/1.1.5
+
+#Retrieve files:
+FILENAME=$1
+echo "Running provean; chunk number" ${SLURM_ARRAY_TASK_ID}
+TOTAL=$(wc -l < ${FILENAME/.txt/.chunk_${SLURM_ARRAY_TASK_ID}.txt})
+COUNTER=0
+
+while read -r GENE; do
+  if [ ! -f provean_output/${GENE}.provean ]
+    then
+    echo "Processing gene $GENE"
+    /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/provean.sh --num_threads $SLURM_CPUS_PER_TASK -q genes_fasta/"$GENE".fa -v genes_variants/"$GENE".var --save_supporting_set genes_support/"$GENE".sss > provean_output/"$GENE".provean
+    else
+    echo "$GENE already processed"
+  fi
+  ((COUNTER++))
+  if [ $(( $COUNTER % 10 )) == 0 ]
+    then
+    echo "Processed $COUNTER genes out of $TOTAL"
+  fi
+  done < ${FILENAME/.txt/.chunk_${SLURM_ARRAY_TASK_ID}.txt}
+
+```
+
+#####Send the array-jobs:
+######fatnode:
+```{bash}
+
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation
+START=16 #Introduce the first chunk (same as in the "Choose chunks" section).
+END=20 #Introduce the last chunk (same as in the "Choose chunks" section).
+PARALLEL=5 #define the desired value:
+
+sbatch --array=1-$PARALLEL /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/parallel_provean_remaining_fat.sh gene_list.chunk_${START}_to_chunk_${END}.remaining.txt
+
+```
+
+######shared:
+```{bash}
+
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation
+START=16 #Introduce the first chunk (same as in the "Choose chunks" section).
+END=20 #Introduce the last chunk (same as in the "Choose chunks" section).
+PARALLEL=5 #define the desired value:
+
+sbatch --array=1-$PARALLEL /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/parallel_provean_remaining_shared.sh gene_list.chunk_${START}_to_chunk_${END}.remaining.txt
+
+```
+
+####Extra rounds of retrieving unfinished genes and launching them:
+#####Choose chunks:
+```{bash}
+
+#Once all chunks of a particular job have finished, run this script to retrieve the list of genes which could not be processed before the queue finished, and group them in new input blocks:
+
+#!!!! IMPORTANT NOTE: don't use a combination of $START and $END which has already been used before, as the old file will be overwritten with the new one. This is specially important if the prior file is still running. Otherwise it's not vital, but it's still preferred to use different combinations.
+
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation
+JOB_ID=8009245 #Introduce the finished job id.
+START=1 #Introduce the first chunk.
+END=10 #Introduce the last chunk.
+PARALLEL=10 #define the number of new partitions.
+
+rm provean_parallel.$JOB_ID.chunk_${START}_to_chunk_${END}.remaining.out
+for ((i=START; i<=END; i++))
+  do
+  ls provean_parallel_remaining.$JOB_ID.chunk_${i}.out >> provean_parallel.$JOB_ID.chunk_${START}_to_chunk_${END}.remaining.out
   done
 
 GENE_LISTS=$(cat provean_parallel.$JOB_ID.chunk_${START}_to_chunk_${END}.remaining.out)
@@ -805,16 +1201,47 @@ sed -n "${START},${TOTAL}p" $FILENAME > ${FILENAME/.txt/.chunk_${i}.txt}
 
 ```
 
-#####parallel_provean_remaining.sh
+#####Send the array-job:
+######fatnode:
+```{bash}
+
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation
+START=1 #Introduce the first chunk (same as in the "Choose chunks" section).
+END=20 #Introduce the last chunk (same as in the "Choose chunks" section).
+PARALLEL=20 #define the desired value:
+
+sbatch --array=1-$PARALLEL /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/parallel_provean_remaining_fat.sh gene_list.chunk_${START}_to_chunk_${END}.remaining.txt
+
+```
+
+###Parallel runs (N=20) of all genes in reverse order:
+####Choose the partition number:
+```{bash}
+
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation
+PARALLEL=20 #define the desired value, and the script will do the rest
+
+FILENAME=gene_list.txt
+FILELIST=$(ls -v ${FILENAME/.txt/.chunk_*.txt} | grep -v 'remaining')
+for FILE in ${FILELIST[@]}
+  do
+  tac $FILE > ${FILE/.chunk/.rev_chunk}
+  done
+
+```
+
+####Scripts:
+#####thinnodes: parallel_provean_remaining_thin.sh
 ```{bash}
 
 #!/bin/bash
-#SBATCH -p fatnode
-#SBATCH -J provean_parallel_remaining
-#SBATCH -o provean_parallel_remaining.%A.chunk_%a.out
+#SBATCH -p thinnodes
+#SBATCH -J provean_parallel_rev
+#SBATCH -o provean_parallel_rev.%A.chunk_%a.out
 #SBATCH -t 100:00:00              # Run time (hh:mm:ss)
-#SBATCH -c 10
-#SBATCH --mem-per-cpu=10GB
+#SBATCH -n 8
+#SBATCH --ntasks-per-node=4
+#SBATCH -c 4
 #SBATCH --mail-type=TIME_LIMIT_80
 #SBATCH --mail-user=dkmanruiz@gmail.com
 
@@ -824,30 +1251,64 @@ module load gcccore/system provean/1.1.5
 #Retrieve files:
 FILENAME=$1
 echo "Running provean; chunk number" ${SLURM_ARRAY_TASK_ID}
-TOTAL=$(wc -l < ${FILENAME/.txt/.chunk_${SLURM_ARRAY_TASK_ID}.txt})
+TOTAL=$(wc -l < ${FILENAME/.txt/.rev_chunk_${SLURM_ARRAY_TASK_ID}.txt})
 COUNTER=0
 
 while read -r GENE; do
-  echo "Processing gene $GENE"
-  /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/provean.sh --num_threads $SLURM_CPUS_PER_TASK -q genes_fasta/"$GENE".fa -v genes_variants/"$GENE".var --save_supporting_set genes_support/"$GENE".sss > provean_output/"$GENE".provean
+  if [ ! -f provean_output/${GENE}.provean ]
+    then
+    echo "Processing gene $GENE"
+    /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/provean.sh --num_threads $SLURM_CPUS_PER_TASK -q genes_fasta/"$GENE".fa -v genes_variants/"$GENE".var --save_supporting_set genes_support/"$GENE".sss > provean_output/"$GENE".provean
+    else
+    echo "$GENE already processed"
+  fi
   ((COUNTER++))
   if [ $(( $COUNTER % 10 )) == 0 ]
     then
     echo "Processed $COUNTER genes out of $TOTAL"
   fi
-  done < ${FILENAME/.txt/.chunk_${SLURM_ARRAY_TASK_ID}.txt}
+  done < ${FILENAME/.txt/.rev_chunk_${SLURM_ARRAY_TASK_ID}.txt}
 
 ```
 
-#####Send the array-job:
+####Send the array-jobs:
+#####thinnodes:
 ```{bash}
 
 cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation
 START=1 #Introduce the first chunk (same as in the "Choose chunks" section).
-END=10 #Introduce the last chunk (same as in the "Choose chunks" section).
-PARALLEL=10 #define the desired value:
+END=20 #Introduce the last chunk (same as in the "Choose chunks" section).
+PARALLEL=20 #define the desired value:
 
-sbatch --array=1-$PARALLEL /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/parallel_provean_remaining.sh gene_list.chunk_1_to_chunk_10.remaining.txt
+sbatch --array=1-$PARALLEL /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/parallel_provean_remaining_thin.sh gene_list.txt
+
+#sbatch --array=10,20 /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/parallel_provean_remaining_thin.sh gene_list.txt #For listing specific chunks, use a comma.
+
+```
+
+####Remove incomplete genes:
+```{bash}
+
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation
+JOB_ID=8002026 #Introduce the finished job id.
+START=1 #Introduce the first chunk.
+END=20 #Introduce the last chunk.
+
+rm provean_parallel.$JOB_ID.chunk_${START}_to_chunk_${END}.out
+for ((i=START; i<=END; i++))
+  do
+  ls provean_parallel_rev.$JOB_ID.chunk_${i}.out >> provean_parallel_rev.$JOB_ID.chunk_${START}_to_chunk_${END}.out
+  done
+
+GENE_LISTS=$(cat provean_parallel_rev.$JOB_ID.chunk_${START}_to_chunk_${END}.out)
+for gene_list in ${GENE_LISTS[@]}
+  do
+  if grep -q "TIME LIMIT" $gene_list; then
+    INTERRUPTED_GENE=$(grep "Processing gene" $gene_list | tail -n1 | cut -d' ' -f3)
+    echo "removing interrupted $INTERRUPTED_GENE.provean from $gene_list"
+    rm provean_output/$INTERRUPTED_GENE.provean
+    fi
+  done
 
 ```
 
@@ -951,6 +1412,7 @@ for gene_list in ${GENE_LISTS[@]}
     fi
   done
 
+#!!!The following is bugged (it extracts genes from all chunks instead of the desired ones only)
 GENES=$(cat gene_list.chunks_last25.txt)
 rm gene_list.chunks_last25.chunk_${START}_to_chunk_${END}.remaining.txt
 for gene in ${GENES[@]}
@@ -986,8 +1448,13 @@ TOTAL=$(wc -l < ${FILENAME})
 COUNTER=0
 
 while read -r GENE; do
-  echo "Processing gene $GENE"
-  /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/provean.sh --num_threads $SLURM_CPUS_PER_TASK -q genes_fasta/"$GENE".fa -v genes_variants/"$GENE".var --save_supporting_set genes_support/"$GENE".sss > provean_output/"$GENE".provean
+  if [ ! -f provean_output/${GENE}.provean ]
+    then
+    echo "Processing gene $GENE"
+    /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/provean.sh --num_threads $SLURM_CPUS_PER_TASK -q genes_fasta/"$GENE".fa -v genes_variants/"$GENE".var --save_supporting_set genes_support/"$GENE".sss > provean_output/"$GENE".provean
+    else
+    echo "$GENE already processed"
+  fi
   ((COUNTER++))
   if [ $(( $COUNTER % 10 )) == 0 ]
     then
@@ -1001,8 +1468,8 @@ while read -r GENE; do
 ```{bash}
 
 cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation
-START=16 #Introduce the first chunk (same as in the "Choose chunks" section).
-END=20 #Introduce the last chunk (same as in the "Choose chunks" section).
+START=1 #Introduce the first chunk (same as in the "Choose chunks" section).
+END=15 #Introduce the last chunk (same as in the "Choose chunks" section).
 
 sbatch /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/onethread_provean.sh gene_list.chunks_last25.chunk_${START}_to_chunk_${END}.remaining.txt
 
@@ -1041,7 +1508,79 @@ echo "scale=6; $AVERAGE_DURATION_SECS/60" | bc
 
 ```
 
-#4. Carry out recombination annotation.
+###Check whether files have been correctly processed:
+```{bash}
+
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/
+GENES=$(cat gene_list.chunk_19.txt) #define file with the list of genes to check.
+for GENE in ${GENES[@]}
+  do
+  if [ ! -f provean_output/${GENE}.provean ]
+    then echo "$GENE NOT PROCESSED YET *************"
+    else 
+      if grep -q "PROVEAN scores" provean_output/${GENE}.provean
+        then echo $GENE "done"
+      elif grep -q "No variations entered" provean_output/${GENE}.provean
+        then echo $GENE "no valid variation ***"
+        else echo $GENE "processing or interrupted ***************************************"
+      fi
+  fi
+  done
+
+```
+
+##Process the Provean output and separate tolerated from deleterious.
+```{bash}
+
+cd /mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation
+
+sort -f -k3,3 -k5,5 pools_individuals_nonsynonymous_gene_names.txt > pools_individuals_nonsynonymous_gene_names.gene_aa_sorted.txt
+
+rm missense_variants_provean_scores.gene_aa_sorted.txt
+
+COUNTER=0
+GENE_LIST=$(cat gene_list.txt)
+TOTAL=$(wc -l < gene_list.txt)
+for gen in ${GENE_LIST[@]}
+  do
+  echo "${gen}"
+  join -i -1 5 -2 1 <(awk -v gene=$gen '$3==gene' pools_individuals_nonsynonymous_gene_names.gene_aa_sorted.txt) <(grep -Ev '#|\[' provean_output/"$gen".provean | sort -f -k1,1) | awk '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $2,$3,$4,$5,$1,$6)}' >> missense_variants_provean_scores.gene_aa_sorted.txt
+  ((COUNTER++))
+  if [ $(( $COUNTER % 100 )) == 0 ]
+    then
+    echo "processed $COUNTER genes out of $TOTAL"
+  fi
+  done
+
+module load bedtools/2.30.0 
+THRESHOLD=-2.5
+awk -F"\t" -v thres=$THRESHOLD '$6 <= thres {printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5,$6)}' missense_variants_provean_scores.gene_aa_sorted.txt | bedtools sort > missense_variants_provean_scores_deleterious.bed #10852 (17.9% of the total 60533)
+awk -F"\t" -v thres=$THRESHOLD '$6 > thres {printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5,$6)}' missense_variants_provean_scores.gene_aa_sorted.txt | bedtools sort > missense_variants_provean_scores_tolerated.bed #49681 (82.1% of the total 60533)
+
+```
+
+#4. Process and combine SIFT and Provean output.
+```{bash}
+
+scp uvibgdkr@ft2.cesga.es://mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/missense_variants_provean_scores_tolerated.bed /share/rdata/ramon.pouso/provean/
+scp uvibgdkr@ft2.cesga.es://mnt/lustre/scratch/home/uvi/bg/dkr/provean_annotation/missense_variants_provean_scores_deleterious.bed /share/rdata/ramon.pouso/provean/
+
+module load gcc/7.2.0
+module add gcc/7.2.0
+#Both tolerated:
+bedtools intersect -a /share/rdata/ramon.pouso/provean/missense_variants_provean_scores_tolerated.bed -b /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/POOLS_gen0-40_missense_variants_SIFT_scores_tolerated.bed | awk '{printf ("%s\t%s\t%s\t%s\n", $1,$2,$3,$4)}' > /share/rdata/ramon.pouso/counts/missense_variants_provean_SIFT_tolerated.bed 
+wc -l < /share/rdata/ramon.pouso/counts/missense_variants_provean_SIFT_tolerated.bed #42633
+#Both deleterious:
+bedtools intersect -a /share/rdata/ramon.pouso/provean/missense_variants_provean_scores_deleterious.bed -b /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/POOLS_gen0-40_missense_variants_SIFT_scores_deleterious.bed | awk '{printf ("%s\t%s\t%s\t%s\n", $1,$2,$3,$4)}' > /share/rdata/ramon.pouso/counts/missense_variants_provean_SIFT_deleterious.bed 
+wc -l < /share/rdata/ramon.pouso/counts/missense_variants_provean_SIFT_deleterious.bed #7025
+#PROV tol, SIFT del:
+bedtools intersect -a /share/rdata/ramon.pouso/provean/missense_variants_provean_scores_tolerated.bed -b /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/POOLS_gen0-40_missense_variants_SIFT_scores_deleterious.bed | wc -l #6887
+#SIFT tol, PROV del:
+bedtools intersect -a /share/rdata/ramon.pouso/provean/missense_variants_provean_scores_deleterious.bed -b /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/POOLS_gen0-40_missense_variants_SIFT_scores_tolerated.bed | wc -l #3803
+
+```
+
+#5. Carry out recombination annotation.
 ##Copy and unzip the programmes.
 ```{bash}
 
