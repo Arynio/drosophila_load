@@ -1580,7 +1580,163 @@ bedtools intersect -a /share/rdata/ramon.pouso/provean/missense_variants_provean
 
 ```
 
-#5. Carry out recombination annotation.
+#5. Carry out 4-fold annotation.
+###Prepare list of genes with synonymous mutations.
+```{bash}
+
+cd /share/rdata/ramon.pouso/4fold
+
+rm pools_individuals_synonymous_vcf.txt
+VCF="/share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.polarized.nr_annovar.dm6nr_multianno.vcf"
+
+#Extract list of sites which are annotated as synonymous:
+grep -e ';ExonicFunc.refGene=synonymous' $VCF >> pools_individuals_synonymous_vcf.txt
+
+#Generate list with coordinates, gene and transcript names, and nucleotid changes:
+awk -F"\t|;AAChange.refGene=|;ALLELE_END" '{printf ("%s\t%s\t%s\n", $1,$2,$9)}' pools_individuals_synonymous_vcf.txt | awk -F"\t|:|," '{printf ("%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$6)}' | awk -F"\t" '{OFS = FS} { gsub(/c\./,"", $5); print }' | grep -v "RNA" | sort -k3,3 -k1,1 -k2,2n > pools_individuals_synonymous_gene_names.txt
+
+#Sanity checks:
+cut -f3 pools_individuals_synonymous_gene_names.txt | sort -u | wc -l #12120 genes
+cut -f4 pools_individuals_synonymous_gene_names.txt | sort -u | wc -l #12120 transcripts
+#If the number of unique gene names and transcript names is the same, the script worked. In a previous version both numbers were different, which allowed me to discover that some genes with parenthesis in their names were introducing bugs. I modified the code to the current version, and now everything checks.
+
+```
+
+###Retrieve the whole nucleotide sequence.
+```{bash}
+
+cd /share/rdata/ramon.pouso/4fold
+
+#First generate a more readable version of the non-redundant annotation file, which keeps only necessary data, and transforms coordinates from 1-based (GTF format) to 0-based (BED format):
+awk -F'\t|gene_id \"|"; transcript_id |; exon_id "|"; gene_name' '($1 == "chr2L" || $1 == "chr2R" || $1 == "chr3L" || $1 == "chr3R" || $1 == "chr4" || $1 == "chrX") && $3=="CDS" {printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\n"),$1,$4-1,$5,$7,$8,$10,$12}' /share/rdata/ramon.pouso/reference/indexed_reference/dm6nr.refGene.gtf > dm6nr.refGene.txt
+
+#Then cross it with the list of genes with synonymous variants to obtain coordinates for all CDS from all genes of interest. I tried to do it faster using grep -Fwf but some genes have special characters (such as "-") which are not considered part of a word, so it introduces some mistakes. So it's best to use this loop instead:
+GENES=$(cat pools_individuals_synonymous_gene_names.txt | cut -f 3 | sort -u)
+COUNTER=0
+rm pools_individuals_synonymous.cds_list.dm6nr.refGene.txt
+for gen in ${GENES[@]}
+  do
+  #echo "${gen}"
+  awk -v gene_name=$gen '$6 == gene_name' dm6nr.refGene.txt >> pools_individuals_synonymous.cds_list.dm6nr.refGene.txt
+  ((COUNTER++))
+  if [ $(( $COUNTER % 100 )) == 0 ]
+    then
+    echo "processed $COUNTER genes out of $(echo "$GENES" | wc -l)"
+  fi
+  done
+awk -F"\t" '{OFS = FS} { gsub(/chr/,"", $1); print }' pools_individuals_synonymous.cds_list.dm6nr.refGene.txt > pools_individuals_synonymous.cds_list.dm6nr.refGene.bed #Remove the "chr" from the chromosome names to convert them into the same format that the fasta uses.
+
+  ##Sanity checks:
+  cut -f6 pools_individuals_synonymous.cds_list.dm6nr.refGene.bed | uniq | wc -l #12002 genes instead of the 12120 found in pools_individuals_synonymous_gene_names.txt because some of the genes in the annovar database are not included in the UCSC .gtf file. 
+  comm -3 <(cut -f3 pools_individuals_synonymous_gene_names.txt | sort -u) <(cut -f6 pools_individuals_synonymous.cds_list.dm6nr.refGene.bed | sort -u) | wc -l #118, which is the correct result of 12120-12002 
+  comm -3 <(cut -f3 pools_individuals_synonymous_gene_names.txt | sort -u) <(cut -f6 pools_individuals_synonymous.cds_list.dm6nr.refGene.bed | sort -u) | less -S #All results are displayed in the first column, which means that all missing entries are missing in the second file, and none from the second file are missing in the first one.
+
+#Retrieve reference sequences for all CDS (from the ancestral fasta to account for polarisation).
+module load gcc/7.2.0
+module add gcc/7.2.0
+bedtools getfasta -fi /share/rdata/ramon.pouso/reference/indexed_reference/ancestral_dmel-all-chromosome-r6.14.fa -bed pools_individuals_synonymous.cds_list.dm6nr.refGene.bed -fo pools_individuals_synonymous.cds_sequence.fa
+
+  ##Sanity checks:
+  grep -v '>' pools_individuals_synonymous.cds_sequence.fa | wc -l #48827, which is the same number of CDS (lines) in the file pools_individuals_synonymous.cds_list.dm6nr.refGene.bed.
+
+#Paste each CDS' sequence with the rest of the information.
+paste pools_individuals_synonymous.cds_list.dm6nr.refGene.bed <(grep -v '>' pools_individuals_synonymous.cds_sequence.fa) > pools_individuals_synonymous.cds_list_and_sequence.dm6nr.refGene.bed
+
+  ##Sanity checks:
+  awk '{printf ("%s\t%s\n"),$3-$2,length($8)}' pools_individuals_synonymous.cds_list_and_sequence.dm6nr.refGene.bed | awk '$1==$2' | wc -l #48827, which means that all retrieved sequences have the correct length (the same as the difference between their start and their end points).
+
+#Fuse all exons from each gene and store them in a file together with the gene name and the strand information.
+GENES=$(cat pools_individuals_synonymous.cds_list_and_sequence.dm6nr.refGene.bed | cut -f 6 | sort -u)
+TOTAL=$(echo "$GENES" | wc -l)
+COUNTER=0
+rm pools_individuals_synonymous.cds_list_and_sequence_combined.dm6nr.refGene.bed
+for gen in ${GENES[@]}
+  do
+  #echo "${gen}"
+  STRAND=$(awk -F"\t" -v gen=$gen '$6 == gen' pools_individuals_synonymous.cds_list_and_sequence.dm6nr.refGene.bed | shuf -n1 | cut -f 4)
+  CODING_SEQUENCE=$(awk -F"\t" -v gen=$gen '$6 == gen {print $8}' pools_individuals_synonymous.cds_list_and_sequence.dm6nr.refGene.bed | tr -d '\n')
+  echo -e "$gen\t$STRAND\t$CODING_SEQUENCE" >> pools_individuals_synonymous.cds_list_and_sequence_combined.dm6nr.refGene.bed
+  ((COUNTER++))
+  if [ $(( $COUNTER % 50 )) == 0 ]
+    then
+    echo "processed $COUNTER genes out of $(echo "$GENES" | wc -l)"
+  fi
+  done
+
+```
+
+##Retrieve codons:
+```{bash}
+
+cd /share/rdata/ramon.pouso/4fold
+
+#First join the synonymous variants and the gene information:
+join -1 3 -2 1 <(sort -k3,3 pools_individuals_synonymous_gene_names.txt) pools_individuals_synonymous.cds_list_and_sequence_combined.dm6nr.refGene.bed | awk '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $2, $3-1, $3, $1, $4, $6, $5, $7)}' > pools_individuals_synonymous.cds_list_and_sequence_combined.complete_info.dm6nr.refGene.bed
+
+#Then for each variant retrieve the codon it belongs to:
+rm pools_individuals_synonymous.cds_list_and_sequence_combined.codons.dm6nr.refGene.bed
+TOTAL=$(cat pools_individuals_synonymous.cds_list_and_sequence_combined.complete_info.dm6nr.refGene.bed | wc -l)
+COUNTER=0
+while read -r CHR START END GENE TRANSCRIPT STRAND SNP_CHANGE SEQUENCE; do
+  SNP=$(echo "${SNP_CHANGE:1:${#SNP_CHANGE}-2}")
+  if [ $STRAND == "+" ]
+    then
+    if [ $(( $SNP % 3 )) == 0 ]
+      then 
+      OLD_CODON=$(echo $SEQUENCE | cut -c$(($SNP-2))-$SNP)
+      NEW_CODON=$(echo "${OLD_CODON:0:2}${SNP_CHANGE: -1}")
+    elif [ $(( $SNP % 3 )) == 2 ]
+      then 
+      OLD_CODON=$(echo $SEQUENCE | cut -c$(($SNP-1))-$(($SNP+1)))
+      NEW_CODON=$(echo "${OLD_CODON:0:1}${SNP_CHANGE: -1}${OLD_CODON:2:3}")
+    elif [ $(( $SNP % 3 )) == 1 ]
+      then 
+      OLD_CODON=$(echo $SEQUENCE | cut -c$SNP-$(($SNP+2)))
+      NEW_CODON=$(echo "${SNP_CHANGE: -1}${OLD_CODON:1:3}")
+    fi
+  elif [ $STRAND == "-" ]
+    then
+    REVERSE_SEQUENCE=$(echo $SEQUENCE | tr ACGT TGCA | rev) #this code obtains the reverse complementary sequence
+    if [ $(( $SNP % 3 )) == 0 ]
+      then 
+      OLD_CODON=$(echo $REVERSE_SEQUENCE | cut -c$(($SNP-2))-$SNP)
+      NEW_CODON=$(echo "${OLD_CODON:0:2}${SNP_CHANGE: -1}")
+    elif [ $(( $SNP % 3 )) == 2 ]
+      then 
+      OLD_CODON=$(echo $REVERSE_SEQUENCE | cut -c$(($SNP-1))-$(($SNP+1)))
+      NEW_CODON=$(echo "${OLD_CODON:0:1}${SNP_CHANGE: -1}${OLD_CODON:2:3}")
+    elif [ $(( $SNP % 3 )) == 1 ]
+      then 
+      OLD_CODON=$(echo $REVERSE_SEQUENCE | cut -c$SNP-$(($SNP+2)))
+      NEW_CODON=$(echo "${SNP_CHANGE: -1}${OLD_CODON:1:3}")
+    fi
+  fi
+  echo -e "$CHR\t$START\t$END\t$GENE\t$TRANSCRIPT\t$STRAND\t$SNP_CHANGE\t$OLD_CODON\t$NEW_CODON" >> pools_individuals_synonymous.cds_list_and_sequence_combined.codons.dm6nr.refGene.bed
+  ((COUNTER++))
+  if [ $(( $COUNTER % 1000 )) == 0 ]
+    then
+    echo "processed $COUNTER SNPs out of" $TOTAL
+  fi
+done < pools_individuals_synonymous.cds_list_and_sequence_combined.complete_info.dm6nr.refGene.bed
+
+```
+
+##Extract 4-fold degenerate codons:
+```{bash}
+
+cd /share/rdata/ramon.pouso/4fold
+
+#First, save the list of 4-fold degenerate codons (obtained from https://github.com/seenstevo/Four-fold_degenerate_bedmaker/blob/master/FFDS_bedmaker.py) to a file:
+echo "CTT","CTA","CTG","CTC","GTT","GTC","GTA","GTG","TCT","TCC","TCA","TCG","CCT","CCC","CCA","CCG","ACT","ACC","ACA","ACG","GCT","GCC","GCA","GCG","CGT","CGC","CGA","CGG","GGT","GGC","GGA","GGG" | tr ',' '\n' > 4fold_codons.txt
+
+#Then filter the file obtained in the previous section, which contains the codon for each variant in the dataset, and filter in only those which are 4-fold degenerate.
+awk 'NR==FNR { A[$1]=1 ; next }; ($8 in A && $9 in A) { print }' 4fold_codons.txt pools_individuals_synonymous.cds_list_and_sequence_combined.codons.dm6nr.refGene.bed > pools_individuals_synonymous.cds_list_and_sequence_combined.4fold_codons.dm6nr.refGene.bed
+
+cut -f-4 pools_individuals_synonymous.cds_list_and_sequence_combined.4fold_codons.dm6nr.refGene.bed > /share/rdata/ramon.pouso/counts/synonymous_variants_4fold.bed
+
+```
+
+#6. Carry out recombination annotation.
 ##Copy and unzip the programmes.
 ```{bash}
 
@@ -1634,6 +1790,10 @@ for file in ${FILES[@]}
   done
 cat dm6/Comeron_100kb_chr*.dm6.bed > dm6/Comeron_100kb_allchr.dm6.bed
 
+#Later on I realised that there are 1-base gaps between all bins (because bedtools works with 0-based coordinates), so use this to fix it:
+awk '{printf ("%s\t%s\t%s\t%s\n",$1,$2-1,$3,$4)}' dm6/Comeron_100kb_allchr.dm6.bed > dm6/Comeron_100kb_allchr.dm6.0based.bed
+
+
 ```
 
 ##Retrieve recombination value for each SNP:
@@ -1648,11 +1808,29 @@ cd /share/rdata/ramon.pouso/recombination/RRC2
 ```
 
 ###Option B: intersect files with bedtools.
+####Original sites dataset:
 ```{bash}
 
 cd /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned
 module load gcc/7.2.0
 module add gcc/7.2.0
 bedtools intersect -a crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.polarized.nr_annovar.dm6nr_multianno.bed -b /share/rdata/ramon.pouso/recombination/RRC2/Comeron_tables/dm6/Comeron_100kb_allchr.dm6.bed -wb | awk -F"\t" '{printf ("%s\t%s\t%s\t%s\n",$1,$2,$3,$8)}' > crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.polarized.nr_annovar.dm6nr_multianno.recombination.bed
+
+```
+
+####Gen0-140 dataset:
+```{bash}
+
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants
+module load gcc/7.2.0
+module add gcc/7.2.0
+bedtools intersect -a crisp_all_pools_gen0-140.recode_snps.gen0-140_Pb_0_variable_set.orthologs.confident.polarized.nr_annovar.dm6nr_multianno.bed -b /share/rdata/ramon.pouso/recombination/RRC2/Comeron_tables/dm6/Comeron_100kb_allchr.dm6.0based.bed -wb | awk -F"\t" '{printf ("%s\t%s\t%s\t%s\n",$1,$2,$3,$8)}' > crisp_all_pools_gen0-140.recode_snps.gen0-140_Pb_0_variable_set.orthologs.confident.polarized.nr_annovar.dm6nr_multianno.recombination.bed
+
+#Retrieve high recombination and low recombination quartiles.
+TOTAL=$(wc -l < crisp_all_pools_gen0-140.recode_snps.gen0-140_Pb_0_variable_set.orthologs.confident.polarized.nr_annovar.dm6nr_multianno.recombination.bed)
+QUARTILE=$((TOTAL/4))
+
+shuf crisp_all_pools_gen0-140.recode_snps.gen0-140_Pb_0_variable_set.orthologs.confident.polarized.nr_annovar.dm6nr_multianno.recombination.bed | sort -k4,4n | head -n$QUARTILE | sort -k1,1 -k2,2n > crisp_all_pools_gen0-140.recode_snps.gen0-140_Pb_0_variable_set.orthologs.confident.polarized.nr_annovar.dm6nr_multianno.low_recombination.bed
+shuf crisp_all_pools_gen0-140.recode_snps.gen0-140_Pb_0_variable_set.orthologs.confident.polarized.nr_annovar.dm6nr_multianno.recombination.bed | sort -k4,4n | tail -n$QUARTILE | sort -k1,1 -k2,2n > crisp_all_pools_gen0-140.recode_snps.gen0-140_Pb_0_variable_set.orthologs.confident.polarized.nr_annovar.dm6nr_multianno.high_recombination.bed
 
 ```
