@@ -1,0 +1,162 @@
+---
+title: "GO_terms"
+output: html_document
+---
+
+#Retrieve lists of genes which lost and retained variation:
+##Gen 140:
+###Generate coordiantes for all gen140 lines:
+```{R, engine='bash'}
+
+#We'll need a list with all genes that still have variation in all lines from gen140, so first concatenate coordinates from all gen140 lines into a single bed file:
+cat /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/pools_counts/gen0-140/sample*_gen140_gen0-140_pool.txt | awk '{printf ("%s\t%s\t%s\n", $1,$2-1,$2)}' | sort -k1,1 -k2,2n -u > /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/pools_counts/gen0-140/all_lines_gen140_gen0-140_pool.bed
+
+```
+
+###Missense deleterious:
+```{R, engine='bash'}
+
+cd /share/rdata/ramon.pouso/go_terms/
+
+module load gcc/7.2.0
+module add gcc/7.2.0
+
+#Pb-000 gene list (starting point):
+bedtools intersect -a /share/rdata/ramon.pouso/counts/missense_variants_provean_SIFT_deleterious.bed -b /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/crisp_all_pools_gen0-140.recode_snps.gen0-140_Pb_0_variable_set.orthologs.confident.polarized.annovar.dm6_multianno.vcf | cut -f4 | sort -u > missense_variants_provean_SIFT_deleterious.Pb-000.gene_list.txt
+
+#Pb-140 gene list:
+##All genes with variation in Pb-140:
+awk '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5,$6,$7,$8,$9,$10)}' /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/pools_counts/gen0-140/C1_gen140_gen0-140_pool.txt | bedtools intersect -a /share/rdata/ramon.pouso/counts/missense_variants_provean_SIFT_deleterious.bed -b stdin | cut -f4 | sort -u > missense_variants_provean_SIFT_deleterious.Pb-140.gene_list.txt
+##Genes which lost variation in Pb-140:
+comm -23 missense_variants_provean_SIFT_deleterious.Pb-000.gene_list.txt missense_variants_provean_SIFT_deleterious.Pb-140.gene_list.txt > missense_variants_provean_SIFT_deleterious.Pb-000.lost_in_Pb-140.gene_list.txt
+##Genes which retained variation in Pb-140:
+comm -12 missense_variants_provean_SIFT_deleterious.Pb-000.gene_list.txt missense_variants_provean_SIFT_deleterious.Pb-140.gene_list.txt > missense_variants_provean_SIFT_deleterious.Pb-000.still_in_Pb-140.gene_list.txt
+
+#Lines-140 gene list:
+##All genes with variation in lines-140:
+bedtools intersect -a /share/rdata/ramon.pouso/counts/missense_variants_provean_SIFT_deleterious.bed -b /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/pools_counts/gen0-140/all_lines_gen140_gen0-140_pool.bed | cut -f4 | sort -u > missense_variants_provean_SIFT_deleterious.lines-140.gene_list.txt
+##Genes which lost variation in lines-140:
+comm -23 missense_variants_provean_SIFT_deleterious.Pb-000.gene_list.txt missense_variants_provean_SIFT_deleterious.lines-140.gene_list.txt > missense_variants_provean_SIFT_deleterious.Pb-000.lost_in_lines-140.gene_list.txt
+##Genes which retained variation in lines-140:
+comm -12 missense_variants_provean_SIFT_deleterious.Pb-000.gene_list.txt missense_variants_provean_SIFT_deleterious.lines-140.gene_list.txt > missense_variants_provean_SIFT_deleterious.Pb-000.still_in_lines-140.gene_list.txt
+##Because the latter list was too long (over 3.000 genes), we need stricter criteria, so first we'll sum ANC and DER counts for all line pools in gen 140:
+cd /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/pools_counts/gen0-140
+paste <(cut -f-8 sample1_gen140_gen0-140_pool.nv.txt) <(awk '{for (i=9;i<=NF;i++) total[FNR","i]+=$i;} END{for (j=1;j<=FNR;j++) {for (i=9;i<=NF;i++) printf "%s\t",total[j","i]; print "";}}' $(ls -v sample*gen140_gen0-140_pool.nv.txt)) > all_lines_gen140_gen0-140_pool.derived_count_sum.txt
+##And then we'll filter out singletons, and retrieve the subset list of genes:
+awk '$10 > "1" {printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5,$6,$7,$8,$9,$10)}' all_lines_gen140_gen0-140_pool.derived_count_sum.txt | bedtools intersect -a /share/rdata/ramon.pouso/counts/missense_variants_provean_SIFT_deleterious.bed -b stdin | cut -f4 | sort -u > /share/rdata/ramon.pouso/go_terms/missense_variants_provean_SIFT_deleterious.Pb-000.still_in_lines-140.except_singletons.gene_list.txt
+
+```
+
+###LoF:
+```{R, engine='bash'}
+
+cd /share/rdata/ramon.pouso/go_terms/
+
+module load gcc/7.2.0
+module add gcc/7.2.0
+
+#First generate a bed file with the coordinates of all LoF SNPs and their gene:
+grep -v '^#' /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/crisp_all_pools_gen0-140.recode_snps.gen0-140_Pb_0_variable_set.orthologs.confident.polarized.annovar.dm6_multianno.vcf | grep -E ';ExonicFunc.refGene=stopgain;|;ExonicFunc.refGene=stoploss;' | awk -F"\t|;AAChange.refGene=|;ALLELE_END" '{printf ("%s\t%s\t%s\t%s\n", $1,$2-1,$2,$9)}' | awk -F"\t|:|," '{printf ("%s\t%s\t%s\t%s\n", $1,$2,$3,$4)}' > /share/rdata/ramon.pouso/counts/LoF_variants_stopgain_stoploss.bed
+
+#Pb-000 gene list (starting point):
+bedtools intersect -a /share/rdata/ramon.pouso/counts/LoF_variants_stopgain_stoploss.bed -b /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/crisp_all_pools_gen0-140.recode_snps.gen0-140_Pb_0_variable_set.orthologs.confident.polarized.annovar.dm6_multianno.vcf | cut -f4 | sort -u > LoF_variants_stopgain_stoploss.Pb-000.gene_list.txt
+
+#Pb-140 gene list:
+##All genes with variation in Pb-140:
+awk '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5,$6,$7,$8,$9,$10)}' /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/pools_counts/gen0-140/C1_gen140_gen0-140_pool.txt | bedtools intersect -a /share/rdata/ramon.pouso/counts/LoF_variants_stopgain_stoploss.bed -b stdin | cut -f4 | sort -u > LoF_variants_stopgain_stoploss.Pb-140.gene_list.txt
+##Genes which lost variation in Pb-140:
+comm -23 LoF_variants_stopgain_stoploss.Pb-000.gene_list.txt LoF_variants_stopgain_stoploss.Pb-140.gene_list.txt > LoF_variants_stopgain_stoploss.Pb-000.lost_in_Pb-140.gene_list.txt
+##Genes which retained variation in Pb-140:
+comm -12 LoF_variants_stopgain_stoploss.Pb-000.gene_list.txt LoF_variants_stopgain_stoploss.Pb-140.gene_list.txt > LoF_variants_stopgain_stoploss.Pb-000.still_in_Pb-140.gene_list.txt
+
+#Lines-140 gene list:
+##All genes with variation in lines-140:
+bedtools intersect -a /share/rdata/ramon.pouso/counts/LoF_variants_stopgain_stoploss.bed -b /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/pools_counts/gen0-140/all_lines_gen140_gen0-140_pool.bed | cut -f4 | sort -u > LoF_variants_stopgain_stoploss.lines-140.gene_list.txt
+##Genes which lost variation in lines-140:
+comm -23 LoF_variants_stopgain_stoploss.Pb-000.gene_list.txt LoF_variants_stopgain_stoploss.lines-140.gene_list.txt > LoF_variants_stopgain_stoploss.Pb-000.lost_in_lines-140.gene_list.txt
+##Genes which retained variation in lines-140:
+comm -12 LoF_variants_stopgain_stoploss.Pb-000.gene_list.txt LoF_variants_stopgain_stoploss.lines-140.gene_list.txt > LoF_variants_stopgain_stoploss.Pb-000.still_in_lines-140.gene_list.txt
+
+```
+
+##Gen 40:
+###Generate coordiantes for all gen40 lines:
+```{R, engine='bash'}
+
+#We'll need a list with all genes that still have variation in all lines from gen140, so first concatenate coordinates from all gen140 lines into a single bed file:
+cat /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/pools_counts/gen0-140/sample*_gen40_gen0-140_pool.txt | awk '{printf ("%s\t%s\t%s\n", $1,$2-1,$2)}' | sort -k1,1 -k2,2n -u > /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/pools_counts/gen0-140/all_lines_gen40_gen0-140_pool.bed
+
+```
+
+###Missense deleterious:
+```{R, engine='bash'}
+
+cd /share/rdata/ramon.pouso/go_terms/
+
+module load gcc/7.2.0
+module add gcc/7.2.0
+
+#Pb-40 gene list:
+##All genes with variation in Pb-040:
+awk '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5,$6,$7,$8,$9,$10)}' /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/pools_counts/gen0-140/c2_gen40_gen0-140_pool.txt | bedtools intersect -a /share/rdata/ramon.pouso/counts/missense_variants_provean_SIFT_deleterious.bed -b stdin | cut -f4 | sort -u > missense_variants_provean_SIFT_deleterious.Pb-040.gene_list.txt
+##Genes which lost variation in Pb-040:
+comm -23 missense_variants_provean_SIFT_deleterious.Pb-000.gene_list.txt missense_variants_provean_SIFT_deleterious.Pb-040.gene_list.txt > missense_variants_provean_SIFT_deleterious.Pb-000.lost_in_Pb-040.gene_list.txt
+##Genes which retained variation in Pb-040:
+comm -12 missense_variants_provean_SIFT_deleterious.Pb-000.gene_list.txt missense_variants_provean_SIFT_deleterious.Pb-040.gene_list.txt > missense_variants_provean_SIFT_deleterious.Pb-000.still_in_Pb-040.gene_list.txt
+
+#Lines-040 gene list:
+##All genes with variation in lines-040:
+bedtools intersect -a /share/rdata/ramon.pouso/counts/missense_variants_provean_SIFT_deleterious.bed -b /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/pools_counts/gen0-140/all_lines_gen40_gen0-140_pool.bed | cut -f4 | sort -u > missense_variants_provean_SIFT_deleterious.lines-040.gene_list.txt
+##Genes which lost variation in lines-040:
+comm -23 missense_variants_provean_SIFT_deleterious.Pb-000.gene_list.txt missense_variants_provean_SIFT_deleterious.lines-040.gene_list.txt > missense_variants_provean_SIFT_deleterious.Pb-000.lost_in_lines-040.gene_list.txt
+##Genes which retained variation in lines-040:
+comm -12 missense_variants_provean_SIFT_deleterious.Pb-000.gene_list.txt missense_variants_provean_SIFT_deleterious.lines-040.gene_list.txt > missense_variants_provean_SIFT_deleterious.Pb-000.still_in_lines-040.gene_list.txt
+##Because the latter list was too long (over 3.000 genes), we need stricter criteria, so first we'll sum ANC and DER counts for all line pools in gen 40:
+cd /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/pools_counts/gen0-140
+paste <(cut -f-8 sample1_gen40_gen0-140_pool.nv.txt) <(awk '{for (i=9;i<=NF;i++) total[FNR","i]+=$i;} END{for (j=1;j<=FNR;j++) {for (i=9;i<=NF;i++) printf "%s\t",total[j","i]; print "";}}' $(ls -v sample*gen40_gen0-140_pool.nv.txt)) > all_lines_gen40_gen0-140_pool.derived_count_sum.txt
+##And then we'll filter out singletons, and retrieve the subset list of genes:
+awk '$10 > "1" {printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5,$6,$7,$8,$9,$10)}' all_lines_gen40_gen0-140_pool.derived_count_sum.txt | bedtools intersect -a /share/rdata/ramon.pouso/counts/missense_variants_provean_SIFT_deleterious.bed -b stdin | cut -f4 | sort -u > /share/rdata/ramon.pouso/go_terms/missense_variants_provean_SIFT_deleterious.Pb-000.still_in_lines-040.except_singletons.gene_list.txt
+
+```
+
+###LoF:
+```{R, engine='bash'}
+
+cd /share/rdata/ramon.pouso/go_terms/
+
+module load gcc/7.2.0
+module add gcc/7.2.0
+
+#Pb-040 gene list:
+##All genes with variation in Pb-040:
+awk '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5,$6,$7,$8,$9,$10)}' /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/pools_counts/gen0-140/c2_gen40_gen0-140_pool.txt | bedtools intersect -a /share/rdata/ramon.pouso/counts/LoF_variants_stopgain_stoploss.bed -b stdin | cut -f4 | sort -u > LoF_variants_stopgain_stoploss.Pb-040.gene_list.txt
+##Genes which lost variation in Pb-040:
+comm -23 LoF_variants_stopgain_stoploss.Pb-000.gene_list.txt LoF_variants_stopgain_stoploss.Pb-040.gene_list.txt > LoF_variants_stopgain_stoploss.Pb-000.lost_in_Pb-040.gene_list.txt
+##Genes which retained variation in Pb-040:
+comm -12 LoF_variants_stopgain_stoploss.Pb-000.gene_list.txt LoF_variants_stopgain_stoploss.Pb-040.gene_list.txt > LoF_variants_stopgain_stoploss.Pb-000.still_in_Pb-040.gene_list.txt
+
+#Lines-040 gene list:
+##All genes with variation in lines-040:
+bedtools intersect -a /share/rdata/ramon.pouso/counts/LoF_variants_stopgain_stoploss.bed -b /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/pools_counts/gen0-140/all_lines_gen40_gen0-140_pool.bed | cut -f4 | sort -u > LoF_variants_stopgain_stoploss.lines-040.gene_list.txt
+##Genes which lost variation in lines-040:
+comm -23 LoF_variants_stopgain_stoploss.Pb-000.gene_list.txt LoF_variants_stopgain_stoploss.lines-040.gene_list.txt > LoF_variants_stopgain_stoploss.Pb-000.lost_in_lines-040.gene_list.txt
+##Genes which retained variation in lines-040:
+comm -12 LoF_variants_stopgain_stoploss.Pb-000.gene_list.txt LoF_variants_stopgain_stoploss.lines-040.gene_list.txt > LoF_variants_stopgain_stoploss.Pb-000.still_in_lines-040.gene_list.txt
+
+```
+
+#Download the lists:
+```{bash}
+
+#I used FileZilla or downloaded them manually.
+##Example:
+scp ramon.pouso@rua2.uvigo.es://share/rdata/ramon.pouso/go_terms/missense_variants_provean_SIFT_deleterious.Pb-000.still_in_lines-140.except_singletons.gene_list.txt /Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/go_terms/
+
+```
+
+#Perform DAVID GO_terms analysis:
+```{bash}
+
+#https://david.ncifcrf.gov/tools.jsp
+
+```
