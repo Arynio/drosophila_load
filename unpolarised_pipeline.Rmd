@@ -1,0 +1,890 @@
+---
+title: "unpolarised_pipeline"
+output: html_document
+date: "2022-12-14"
+---
+
+#Summary.
+```{R, engine='bash'}
+
+#Pipeline to explore the unpolarised dataset. The VCF was generated within the all_sites_pipeline. See steps 1-5 over there.
+
+```
+
+#6. Carry out general annotation with ANNOVAR:
+##Build the drosophila database.
+###Good complete version (changes codes in the UCSC database).
+```{R, engine='bash'}
+
+#First, copy the original version of the database (and rename it as "old_annovar_database") so that any new changes do not overwrite the original version.
+/share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/
+scp -pr ancestral_dm6 reference_dm6
+
+cd annovar_database/reference_dm6/
+rm /share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/reference_dm6/dm6_seq/dm6_ancestral_dmel-all-chromosome-r6.14.fa
+
+#Note: any code involving annotate_variation.pl won't work because apparently the server blocks its attempts to download files from an external website, so I had to replace it with alternative code.
+
+#The following commented section doesn't need to be repeated:
+<!-- #First download, uncompress and rename the gene database: -->
+<!-- wget https://hgdownload.cse.ucsc.edu/goldenPath/dm6/database/refGene.txt.gz -->
+<!-- gunzip -c refGene.txt.gz > dm6_refGene.txt -->
+
+<!-- #Next, download the chromosome names equivalence file (aka "alias" or "dictionary"), which we'll need to edit the gene database so that the scaffolds use the same nomenclature as our files: -->
+<!-- wget https://hgdownload.cse.ucsc.edu/goldenPath/dm6/bigZips/dm6.chromAlias.txt -->
+<!-- nano dm6.chromAlias.txt #edit it to add "mitochondrion_genome" in the fourth column for the row that starts with chrM. -->
+
+<!-- #Then we can replace all database names with the UCSC names, which are used in our VCFs and fasta files. -->
+<!-- DB_CODES=$(cut -f3 dm6_refGene.txt | sort | uniq) -->
+<!-- for old_code in ${DB_CODES[@]} -->
+<!--   do -->
+<!--   new_code=$(awk -v old=$old_code '$1==old' dm6.chromAlias.txt | cut -f4) -->
+<!--   echo "${old_code} -> ${new_code}" -->
+<!--   sed -i -e "s/\<$old_code\>/$new_code/g" dm6_refGene.txt -->
+<!--   done -->
+
+<!-- diff <(cut -f-2,4- dm6_refGene.txt) <(cut -f-2,4- refGene.txt) #checks whether the previous loop modified any other field. Since no lines are returned, both files are identical (outside of the 3rd column, which was changed). -->
+
+#The following has to be repeated, since the new polarisation means that the ancestral genome has changed:
+#Copy the ancestral fasta (obtained in the polarisation.Rmd script) to the aproppriate folder:
+scp -p /share/rdata/ramon.pouso/reference/indexed_reference/dmel-all-chromosome-r6.14.fasta dm6_seq/dm6_dmel-all-chromosome-r6.14.fasta
+
+#Next, use annovar to build the gene database:
+module load annovar/4.19
+retrieve_seq_from_fasta.pl dm6_refGene.txt -seqfile dm6_seq/dm6_dmel-all-chromosome-r6.14.fasta -format refGene -outfile dm6_refGeneMrna.fa
+
+```
+
+###Good non-redundant version (changes codes in the UCSC database).
+```{R, engine='bash'}
+
+#This version is a clone of the good complete version from which we'll remove all isoforms except for the longest one. Hence this is the "non-redundant" or "main isoforms" version of the annovar database, which we'll use to simplify the subsequent PROVEAN annotation.
+
+#The following commented section doesn't need to be repeated:
+<!-- #First, download the .gtf gene database from the UCSC: -->
+<!-- cd /share/rdata/ramon.pouso/reference/indexed_reference/ -->
+<!-- wget https://hgdownload.soe.ucsc.edu/goldenPath/dm6/bigZips/genes/dm6.refGene.gtf.gz -->
+<!-- gunzip dm6.refGene.gtf.gz -->
+
+<!-- #Then extract the list of transcripts, calculate their size, and keep the largest one for each chromosome. -->
+<!-- awk -F"\t|gene_id |; transcript_id |;  gene_name " '($1 == "chr2L" || $1 == "chr2R" || $1 == "chr3L" || $1 == "chr3R" || $1 == "chr4" || $1 == "chrX") && $3=="transcript" {printf ("%s\t%s\t%s\t%s\n"),$1,$5-$4,$10,$11}' dm6.refGene.gtf | sed 's/"//g' | sort -k1,1 -k3,3 -k2,2nr | sort -k3,3 -u | sort -k1,1 -k3,3 > dm6nr.refGene.txt -->
+<!-- grep -Ff <(cut -f4 dm6nr.refGene.txt) dm6.refGene.gtf > dm6nr.refGene.gtf -->
+
+#Next, clone the previous ancestral database and rename it and some of its files to include the code "nr" (non-redundant):
+cd /share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/
+#scp -pr reference_dm6 nr_reference_dm6
+cd nr_reference_dm6
+mv dm6_seq dm6nr_seq
+mv dm6nr_seq/dm6_dmel-all-chromosome-r6.14.fasta dm6nr_seq/dm6nr_dmel-all-chromosome-r6.14.fasta
+mv dm6.chromAlias.txt dm6nr.chromAlias.txt
+rm dm6_refGeneMrna.fa
+
+#Then subset the dm6 annovar database so that only main isoforms are kept, and remove the original database.
+grep -Ff <(cut -f4 /share/rdata/ramon.pouso/reference/indexed_reference/dm6nr.refGene.txt) dm6_refGene.txt > dm6nr_refGene.txt
+rm dm6_refGene.txt
+
+#Next, use annovar to build the gene database:
+module load annovar/4.19
+retrieve_seq_from_fasta.pl dm6nr_refGene.txt -seqfile dm6nr_seq/dm6nr_dmel-all-chromosome-r6.14.fasta -format refGene -outfile dm6nr_refGeneMrna.fa
+
+```
+
+##Annotate the VCFs.
+###Non-redundant version.
+```{R, engine='bash'}
+
+module load annovar/4.19
+module load gcc/7.2.0 
+module add gcc/7.2.0 
+
+
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/
+FILE=crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.vcf #crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.vcf
+
+#First convert from VCF to table (annovar can't deal with the particular format of the pool. VCFs).
+convert2annovar.pl -format vcf4old --outfile ${FILE/.vcf/.annovar} $FILE
+
+#Next, annotate the table. The resulting file is automatically labelled as .vcf by the programme, even though it really isn't a VCF.
+table_annovar.pl ${FILE/.vcf/.annovar} /share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/nr_reference_dm6 -vcfinput --outfile ${FILE/.vcf/.nr_annovar} -buildver dm6nr --protocol refGene --operation g
+
+#Convert the annotated table to a .bed.
+mv ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.vcf ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.tab
+awk -F"\t|;ANNOVAR_DATE" '{printf ("%s\t%s\t%s\tANNOVAR_DATE%s\n"),$1,$2-1,$3,$9}' ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.tab > ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.bed
+
+#Then intersect the polarized VCF with the annotated BED and edit it to obtain the annotated VCF:
+grep '^#' $FILE > ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.vcf
+bedtools intersect -a $FILE -b ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.bed -wb | awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s;%s\n"),$1,$2-1,$2,$3,$4,$5,$6,$7,$8,$NF}' | bedtools intersect -a stdin -b $FILE -wb | cut -f1,3-9,18- >> ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.vcf
+
+```
+
+#7. Carry out SIFT annotation:
+##Install the programme and download the database.
+```{R, engine='bash'}
+
+#Doesn't need to be repeated:
+<!-- https://sift.bii.a-star.edu.sg/sift4g/SIFT4G_codes.html -->
+<!-- https://github.com/pauline-ng/SIFT4G_Create_Genomic_DB#DBfromGTF -->
+
+<!-- #I'm following instructions from https://sift.bii.a-star.edu.sg/sift4g/Commandline.html -->
+
+<!-- mkdir -p /share/rdata/ramon.pouso/reference/indexed_reference/sift_database/ -->
+<!-- cd /share/rdata/ramon.pouso/reference/indexed_reference/sift_database/ -->
+
+<!-- #First download and uncompress the database. -->
+<!-- wget https://sift.bii.a-star.edu.sg/sift4g/public//Drosophila_melanogaster/BDGP6.83.zip --no-check-certificate -->
+<!-- jar xf BDGP6.83.zip #The unzipped folder will have three files for each chromosome: a compressed chromosome file (.gz); a regions file (.regions); a chromosome statistics file (.txt). -->
+
+<!-- #Then download the jar file to execute the programme. -->
+<!-- wget -P /share/rdata/ramon.pouso https://github.com/pauline-ng/SIFT4G_Annotator/raw/master/SIFT4G_Annotator.jar -->
+
+```
+
+##Download the reference drosophila database:
+```{R, engine='bash'}
+
+cd /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/sift4g_annotation/scripts_to_build_SIFT_db/test_files
+
+wget https://sift.bii.a-star.edu.sg/sift4g/public//Drosophila_melanogaster/BDGP6.83.zip
+unzip BDGP6.83.zip #-d destination_folder
+
+```
+
+##Run the programme:
+####nr version:
+#####Upload the VCFs and the SIFT4G jar file to CESGA:
+```{R, engine='bash'}
+
+#In CESGA, create the destination folders:
+mkdir -p /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/sift4g_annotation/annotation/pools_gen0-140/
+
+#From the cluster, copy the following files:
+##ANNOVAR-annotated VCF:
+FILE=crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.nr_annovar.dm6nr_multianno.vcf #crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.nr_annovar.dm6nr_multianno.vcf
+scp -p /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/$FILE uvibgdkr@ft3.cesga.es://mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/sift4g_annotation/annotation/pools_gen0-140/
+##SIFT4G jar file:
+#scp -p /share/rdata/ramon.pouso/sift4g/SIFT4G_Annotator_v2.4.jar uvibgdkr@ft3.cesga.es://mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/sift4g_annotation/sift4g/
+
+```
+
+#####Annotate the files:
+```{R, engine='bash'}
+
+#Launch it as follows for each VCF (don't copy them from here to the terminal; invisible spaces will break it):
+cd /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/sift4g_annotation/annotation/pools_gen0-140
+FILE=crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.nr_annovar.dm6nr_multianno.vcf #crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.nr_annovar.dm6nr_multianno.vcf
+
+java -jar /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/sift4g_annotation/sift4g/SIFT4G_Annotator_v2.4.jar -c -t -i $FILE -d /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/sift4g_annotation/scripts_to_build_SIFT_db/test_files/BDGP6.83 -r ./
+
+#If this doesn't work from the standard interactive shell in CESGA, then request dedicated interactive nodes, and run the former core from there. E.g.: compute -c 2 --mem 20
+
+```
+
+#####Download the VCFs from CESGA:
+```{R, engine='bash'}
+
+#From the cluster, copy the following files:
+FILE=crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.nr_annovar.dm6nr_multianno_SIFTpredictions.vcf #crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.nr_annovar.dm6nr_multianno_SIFTpredictions.vcf
+scp -p uvibgdkr@ft3.cesga.es://mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/sift4g_annotation/annotation/pools_gen0-140/$FILE /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/
+
+```
+
+##Analyse the output:
+###Generate clean table:
+```{bash}
+
+#It's important to select the relevant annotation per site when there is more than one. Extract the name of the gene from the annovar part, then also from the sift part, and keep only the matching one!
+
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/
+VCF=crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.nr_annovar.dm6nr_multianno_SIFTpredictions.vcf #crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.nr_annovar.dm6nr_multianno_SIFTpredictions.vcf
+
+#One entry: 
+grep -v '^#' $VCF | grep 'nonsynonymous_SNV' | grep 'SIFT' | awk '!($5 ~ ",")' | awk -F";Gene\\\\.refGene=|;GeneDetail\\\\.refGene=|;AAChange\\\\.refGene=|;ALLELE_END|;SIFTINFO=|\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$9,$11,$13)}' | awk 'BEGIN{FS=OFS="\t"} {gsub(":","_", $4);gsub("\\(","_");gsub("\\)","_");print}' | awk -F"\t|:" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$10)}' | grep -v "," > ${VCF/.vcf/.clean.txt}
+#Multiple entries:
+grep -v '^#' $VCF | grep 'nonsynonymous_SNV' | grep 'SIFT' | awk '!($5 ~ ",")' | awk -F";Gene\\\\.refGene=|;GeneDetail\\\\.refGene=|;AAChange\\\\.refGene=|;ALLELE_END|;SIFTINFO=|\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$9,$11,$13)}' | awk 'BEGIN{FS=OFS="\t"} {gsub(":","_", $4);gsub("\\(","_");gsub("\\)","_");print}' | awk -F"\t|:" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$10)}' | grep "," | sed 's/,/\t/g' | awk '{for(i=6;i<=NF;i++){if($i ~ $5){printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$i)}}}' >> ${VCF/.vcf/.clean.txt}
+
+#Note: the above code doesn't work properly for a few genes with weird annotation fields. Downstream analysis may fail for those.
+
+sort -k1,1 -k2,2n ${VCF/.vcf/.clean.txt} > ${VCF/.vcf/.sorted.txt} && mv ${VCF/.vcf/.sorted.txt} ${VCF/.vcf/.clean.txt}
+
+```
+
+###Major isoforms version:
+####Convert coordinates from FlyBase to RefSeq:
+#####Copy files to CESGA:
+```{bash}
+
+#This will be done in CESGA because curl doesn't work properly in the local cluster.
+mkdir -p /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/all_sites_pipeline/flybase_refseq_conversion
+cd /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/all_sites_pipeline/flybase_refseq_conversion
+
+#From the local cluster:
+scp -p /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.nr_annovar.dm6nr_multianno_SIFTpredictions.clean.txt uvibgdkr@ft3.cesga.es://mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/all_sites_pipeline/flybase_refseq_conversion/
+
+```
+
+#####Convert coordinates using the FlyBase API:
+```{bash}
+
+#This will be done in CESGA because curl doesn't work properly in the local cluster.
+cd /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/all_sites_pipeline/flybase_refseq_conversion
+VCF=crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.nr_annovar.dm6nr_multianno_SIFTpredictions.clean.txt
+
+#Extract all flybase transcripts in the VCF:
+awk -F"\t|\\\\|" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$7)}' $VCF | sort -k1,1 -k2,2n | cut -f6 | sort | uniq | tail -n+2 > flybase_transcripts.list #warning: tail -n+2 is used to remove an empty line (which results from a few genes with weird annotation fields being wrong in the .clean.txt file).
+
+echo -e "flybase_ID\trefseq_ID" > flybase_refseq_conversion_dictionary.txt
+TOTAL=$(wc -l < flybase_transcripts.list)
+COUNTER=0
+while read -r FLYBASE
+  do
+  REFSEQ=$(curl -s -X GET "https://api.flybase.org/api/v1.0/sequence/id/$FLYBASE/FBtr" -H "accept: application/json" | tr , '\n'| grep "^REFSEQ" | awk -F":|;" '{print $2}' | uniq) #extract the RefSeq ID corresponding to the current FlyBase ID
+  if [ $(echo "$REFSEQ" | wc -l) -gt 1 ] #if there's more than one unique match, group all in a single line
+    then
+    REFSEQ=$(echo "$REFSEQ" | tr "\n" :)
+  fi
+  echo -e "$FLYBASE\t$REFSEQ" >> flybase_refseq_conversion_dictionary.txt
+  ((COUNTER++))
+  if [ $(( $COUNTER % 50 )) == 0 ]
+    then
+    echo "processed $COUNTER transcripts out of $TOTAL"
+  fi
+  sleep 0.4
+  done < flybase_transcripts.list
+
+```
+
+#####Download and intersect the dictionary:
+```{bash}
+
+#From the local cluster:
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/
+scp -p uvibgdkr@ft3.cesga.es://mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/all_sites_pipeline/flybase_refseq_conversion/flybase_refseq_conversion_dictionary.txt /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/
+
+#Extract the list of RefSeq transcripts in the polarised VCF, intersect it with the dictionary, keep the FlyBase translations, and interesect those with the unpolarised VCF:
+grep -wFf <(grep -wFf <(awk -F"\t|\\\\|" '{printf ("%s\n", $7)}' crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.polarized.nr_annovar.dm6nr_multianno_SIFTpredictions.clean.txt | sort -u | tail -n+2) flybase_refseq_conversion_dictionary.txt | cut -f1) crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.nr_annovar.dm6nr_multianno_SIFTpredictions.clean.txt > crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.nr_annovar.dm6nr_multianno_SIFTpredictions.clean_nr_major.txt
+
+```
+
+####Apply thresholds:
+#####Default thresholds:
+```{bash}
+
+#Classify the mutations in deleterious and tolerated categories:
+module load gcc/7.2.0
+module add gcc/7.2.0
+grep "DELETERIOUS" crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.nr_annovar.dm6nr_multianno_SIFTpredictions.clean_nr_major.txt | bedtools sort > gen0-140_all_sites_unpolarised_nr_major_missense_variants_SIFT_scores_deleterious.bed #10279
+grep "TOLERATED" crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.nr_annovar.dm6nr_multianno_SIFTpredictions.clean_nr_major.txt | bedtools sort > gen0-140_all_sites_unpolarised_nr_major_missense_variants_SIFT_scores_tolerated.bed #42436
+
+#Check genes with parentheses:
+#grep -v '^#' crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.nr_annovar.dm6nr_multianno_SIFTpredictions.vcf | grep 'synonymous_SNV' | grep 'SIFT' | awk -F";Gene\\\\.refGene=|;GeneDetail\\\\.refGene=|;AAChange\\\\.refGene=|;ALLELE_END|;SIFTINFO=|\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$9,$11,$13)}' | awk -F"\t" '{gsub(/:/,"_", $4); print}' | awk -F"\t|:" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$10)}' | awk '$5 ~ "\\("' | grep "," | sed 's/,/\t/g' | awk -F"\t" '{gsub("\\(","_");gsub("\\)","_");print}' | awk '{for(i=6;i<=NF;i++){if($i ~ $5){printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$i)}}}' | less -S
+
+#Check consistency between the polarised and the unpolarised VCFs:
+##Both deleterious:
+bedtools intersect -a gen0-140_all_sites_unpolarised_nr_major_missense_variants_SIFT_scores_deleterious.bed -b gen0-140_all_sites_missense_variants_SIFT_scores_deleterious.bed | wc -l #6811
+#Both tolerated:
+bedtools intersect -a gen0-140_all_sites_unpolarised_nr_major_missense_variants_SIFT_scores_tolerated.bed -b gen0-140_all_sites_missense_variants_SIFT_scores_tolerated.bed | wc -l #37045
+##Deleterious in unpolarised, tolerated in polarised:
+bedtools intersect -a gen0-140_all_sites_unpolarised_nr_major_missense_variants_SIFT_scores_deleterious.bed -b gen0-140_all_sites_missense_variants_SIFT_scores_tolerated.bed | wc -l #3396
+##Tolerated in unpolarised, deleterious in polarised:
+bedtools intersect -a gen0-140_all_sites_unpolarised_nr_major_missense_variants_SIFT_scores_tolerated.bed -b gen0-140_all_sites_missense_variants_SIFT_scores_deleterious.bed | wc -l #5228
+
+#Lots of differences due to lack of polarisation!
+
+```
+
+#####≤0.01 vs >0.05:
+```{bash}
+
+#It's important to select the relevant annotation per site when there is more than one. Extract the name of the gene from the annovar part, then also from the sift part, and keep only the matching one!
+
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/
+VCF=crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.polarized.nr_annovar.dm6nr_multianno_SIFTpredictions.vcf
+
+#One entry: 
+grep -v '^#' $VCF | grep 'nonsynonymous_SNV' | grep 'SIFT' | awk '!($5 ~ ",")' | awk -F";Gene\\\\.refGene=|;GeneDetail\\\\.refGene=|;AAChange\\\\.refGene=|;ALLELE_END|;SIFTINFO=|\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$9,$11,$13)}' | awk 'BEGIN{FS=OFS="\t"} {gsub(":","_", $4);gsub("\\(","_");gsub("\\)","_");print}' | awk -F"\t|:" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$10)}' | grep -v "," > ${VCF/.vcf/.clean.txt}
+#Multiple entries:
+grep -v '^#' $VCF | grep 'nonsynonymous_SNV' | grep 'SIFT' | awk '!($5 ~ ",")' | awk -F";Gene\\\\.refGene=|;GeneDetail\\\\.refGene=|;AAChange\\\\.refGene=|;ALLELE_END|;SIFTINFO=|\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$9,$11,$13)}' | awk 'BEGIN{FS=OFS="\t"} {gsub(":","_", $4);gsub("\\(","_");gsub("\\)","_");print}' | awk -F"\t|:" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$10)}' | grep "," | sed 's/,/\t/g' | awk '{for(i=6;i<=NF;i++){if($i ~ $5){printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$i)}}}' >> ${VCF/.vcf/.clean.txt}
+
+#Classify the mutations in deleterious and tolerated categories:
+module load gcc/7.2.0
+module add gcc/7.2.0
+grep "DELETERIOUS" ${VCF/.vcf/.clean.txt} | awk -F"\t|\\\\|" 'BEGIN{OFS="\t"} {printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$14)}' | awk '$6<=0.01' | bedtools sort > gen0-140_all_sites_missense_variants_SIFT_scores_001deleterious.bed #9890 instead of 15595 with the default threshold
+#grep "TOLERATED" ${VCF/.vcf/.clean.txt} | bedtools sort > gen0-140_all_sites_missense_variants_SIFT_scores_tolerated.bed
+
+```
+
+#####≤0.05 vs >0.20:
+```{bash}
+
+#It's important to select the relevant annotation per site when there is more than one. Extract the name of the gene from the annovar part, then also from the sift part, and keep only the matching one!
+
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/
+VCF=crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.polarized.nr_annovar.dm6nr_multianno_SIFTpredictions.vcf
+
+#One entry: 
+grep -v '^#' $VCF | grep 'nonsynonymous_SNV' | grep 'SIFT' | awk '!($5 ~ ",")' | awk -F";Gene\\\\.refGene=|;GeneDetail\\\\.refGene=|;AAChange\\\\.refGene=|;ALLELE_END|;SIFTINFO=|\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$9,$11,$13)}' | awk 'BEGIN{FS=OFS="\t"} {gsub(":","_", $4);gsub("\\(","_");gsub("\\)","_");print}' | awk -F"\t|:" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$10)}' | grep -v "," > ${VCF/.vcf/.clean.txt}
+#Multiple entries:
+grep -v '^#' $VCF | grep 'nonsynonymous_SNV' | grep 'SIFT' | awk '!($5 ~ ",")' | awk -F";Gene\\\\.refGene=|;GeneDetail\\\\.refGene=|;AAChange\\\\.refGene=|;ALLELE_END|;SIFTINFO=|\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$9,$11,$13)}' | awk 'BEGIN{FS=OFS="\t"} {gsub(":","_", $4);gsub("\\(","_");gsub("\\)","_");print}' | awk -F"\t|:" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$10)}' | grep "," | sed 's/,/\t/g' | awk '{for(i=6;i<=NF;i++){if($i ~ $5){printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$i)}}}' >> ${VCF/.vcf/.clean.txt}
+
+#Classify the mutations in deleterious and tolerated categories:
+module load gcc/7.2.0
+module add gcc/7.2.0
+#grep "DELETERIOUS" ${VCF/.vcf/.clean.txt} | bedtools sort > gen0-140_all_sites_missense_variants_SIFT_scores_deleterious.bed
+grep "TOLERATED" ${VCF/.vcf/.clean.txt} | awk -F"\t|\\\\|" 'BEGIN{OFS="\t"} {printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$14)}' | awk '$6>=0.20' | bedtools sort > gen0-140_all_sites_missense_variants_SIFT_scores_020tolerated.bed #34901 instead of 50774 with the default threshold 
+
+```
+
+###Random isoforms version:
+####Pick random transcript:
+```{bash}
+
+#The following code picks a random transcript for each position (which means that within a single gene, different transcripts will be selected for each gene).
+module load gcc/7.2.0
+module add gcc/7.2.0
+
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants
+
+VCF=crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.nr_annovar.dm6nr_multianno_SIFTpredictions.clean.txt #crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.nr_annovar.dm6nr_multianno_SIFTpredictions.clean.txt
+
+sort -k1,1 -k2,2n -k6,6R $VCF | sort -k1,1 -k2,2n -u > ${VCF/.txt/_nr_random.txt}
+
+```
+
+####Apply thresholds:
+#####Default thresholds:
+```{bash}
+
+#Classify the mutations in deleterious and tolerated categories:
+module load gcc/7.2.0
+module add gcc/7.2.0
+VCF=crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.nr_annovar.dm6nr_multianno_SIFTpredictions.clean.txt
+grep "DELETERIOUS" ${VCF/.txt/_nr_random.txt} | bedtools sort > gen0-140_all_sites_unpolarised_nr_random_missense_variants_SIFT_scores_deleterious.bed #11795
+grep "TOLERATED" ${VCF/.txt/_nr_random.txt} | bedtools sort > gen0-140_all_sites_unpolarised_nr_random_missense_variants_SIFT_scores_tolerated.bed #48713
+
+#Check genes with parentheses:
+#grep -v '^#' $VCF | grep 'synonymous_SNV' | grep 'SIFT' | awk -F";Gene\\\\.refGene=|;GeneDetail\\\\.refGene=|;AAChange\\\\.refGene=|;ALLELE_END|;SIFTINFO=|\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$9,$11,$13)}' | awk -F"\t" '{gsub(/:/,"_", $4); print}' | awk -F"\t|:" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$10)}' | awk '$5 ~ "\\("' | grep "," | sed 's/,/\t/g' | awk -F"\t" '{gsub("\\(","_");gsub("\\)","_");print}' | awk '{for(i=6;i<=NF;i++){if($i ~ $5){printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$i)}}}' | less -S
+
+#Check consistency between the polarised and the unpolarised VCFs:
+##Both deleterious:
+bedtools intersect -a gen0-140_all_sites_unpolarised_nr_random_missense_variants_SIFT_scores_deleterious.bed -b gen0-140_all_sites_missense_variants_SIFT_scores_deleterious.bed | wc -l #7750
+#Both tolerated:
+bedtools intersect -a gen0-140_all_sites_unpolarised_nr_random_missense_variants_SIFT_scores_tolerated.bed -b gen0-140_all_sites_missense_variants_SIFT_scores_tolerated.bed | wc -l #42344
+##Deleterious in unpolarised, tolerated in polarised:
+bedtools intersect -a gen0-140_all_sites_unpolarised_nr_random_missense_variants_SIFT_scores_deleterious.bed -b gen0-140_all_sites_missense_variants_SIFT_scores_tolerated.bed | wc -l #3931
+##Tolerated in unpolarised, deleterious in polarised:
+bedtools intersect -a gen0-140_all_sites_unpolarised_nr_random_missense_variants_SIFT_scores_tolerated.bed -b gen0-140_all_sites_missense_variants_SIFT_scores_deleterious.bed | wc -l #6094
+
+#Lots of differences due to lack of polarisation!
+
+
+
+#Version with more sites:
+VCF=crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.nr_annovar.dm6nr_multianno_SIFTpredictions.clean.txt
+grep "DELETERIOUS" ${VCF/.txt/_nr_random.txt} | bedtools sort > gen0-140_all_sites_unpolarised_extra_nr_random_missense_variants_SIFT_scores_deleterious.bed #12211
+grep "TOLERATED" ${VCF/.txt/_nr_random.txt} | bedtools sort > gen0-140_all_sites_unpolarised_extra_nr_random_missense_variants_SIFT_scores_tolerated.bed #52398
+
+#Check genes with parentheses:
+#grep -v '^#' $VCF | grep 'synonymous_SNV' | grep 'SIFT' | awk -F";Gene\\\\.refGene=|;GeneDetail\\\\.refGene=|;AAChange\\\\.refGene=|;ALLELE_END|;SIFTINFO=|\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$9,$11,$13)}' | awk -F"\t" '{gsub(/:/,"_", $4); print}' | awk -F"\t|:" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$10)}' | awk '$5 ~ "\\("' | grep "," | sed 's/,/\t/g' | awk -F"\t" '{gsub("\\(","_");gsub("\\)","_");print}' | awk '{for(i=6;i<=NF;i++){if($i ~ $5){printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$i)}}}' | less -S
+
+#Check consistency between the polarised and the unpolarised VCFs:
+##Both deleterious:
+bedtools intersect -a gen0-140_all_sites_unpolarised_extra_nr_random_missense_variants_SIFT_scores_deleterious.bed -b gen0-140_all_sites_missense_variants_SIFT_scores_deleterious.bed | wc -l #7777
+#Both tolerated:
+bedtools intersect -a gen0-140_all_sites_unpolarised_extra_nr_random_missense_variants_SIFT_scores_tolerated.bed -b gen0-140_all_sites_missense_variants_SIFT_scores_tolerated.bed | wc -l #42308
+##Deleterious in unpolarised, tolerated in polarised:
+bedtools intersect -a gen0-140_all_sites_unpolarised_extra_nr_random_missense_variants_SIFT_scores_deleterious.bed -b gen0-140_all_sites_missense_variants_SIFT_scores_tolerated.bed | wc -l #3953
+##Tolerated in unpolarised, deleterious in polarised:
+bedtools intersect -a gen0-140_all_sites_unpolarised_extra_nr_random_missense_variants_SIFT_scores_tolerated.bed -b gen0-140_all_sites_missense_variants_SIFT_scores_deleterious.bed | wc -l #6071
+
+```
+
+#####≤0.01 vs >0.05:
+```{bash}
+
+#It's important to select the relevant annotation per site when there is more than one. Extract the name of the gene from the annovar part, then also from the sift part, and keep only the matching one!
+
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/
+VCF=crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.polarized.nr_annovar.dm6nr_multianno_SIFTpredictions.vcf
+
+#One entry: 
+grep -v '^#' $VCF | grep 'nonsynonymous_SNV' | grep 'SIFT' | awk '!($5 ~ ",")' | awk -F";Gene\\\\.refGene=|;GeneDetail\\\\.refGene=|;AAChange\\\\.refGene=|;ALLELE_END|;SIFTINFO=|\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$9,$11,$13)}' | awk 'BEGIN{FS=OFS="\t"} {gsub(":","_", $4);gsub("\\(","_");gsub("\\)","_");print}' | awk -F"\t|:" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$10)}' | grep -v "," > ${VCF/.vcf/.clean.txt}
+#Multiple entries:
+grep -v '^#' $VCF | grep 'nonsynonymous_SNV' | grep 'SIFT' | awk '!($5 ~ ",")' | awk -F";Gene\\\\.refGene=|;GeneDetail\\\\.refGene=|;AAChange\\\\.refGene=|;ALLELE_END|;SIFTINFO=|\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$9,$11,$13)}' | awk 'BEGIN{FS=OFS="\t"} {gsub(":","_", $4);gsub("\\(","_");gsub("\\)","_");print}' | awk -F"\t|:" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$10)}' | grep "," | sed 's/,/\t/g' | awk '{for(i=6;i<=NF;i++){if($i ~ $5){printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$i)}}}' >> ${VCF/.vcf/.clean.txt}
+
+#Classify the mutations in deleterious and tolerated categories:
+module load gcc/7.2.0
+module add gcc/7.2.0
+grep "DELETERIOUS" ${VCF/.vcf/.clean.txt} | awk -F"\t|\\\\|" 'BEGIN{OFS="\t"} {printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$14)}' | awk '$6<=0.01' | bedtools sort > gen0-140_all_sites_missense_variants_SIFT_scores_001deleterious.bed #9890 instead of 15595 with the default threshold
+#grep "TOLERATED" ${VCF/.vcf/.clean.txt} | bedtools sort > gen0-140_all_sites_missense_variants_SIFT_scores_tolerated.bed
+
+```
+
+#####≤0.05 vs >0.20:
+```{bash}
+
+#It's important to select the relevant annotation per site when there is more than one. Extract the name of the gene from the annovar part, then also from the sift part, and keep only the matching one!
+
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/
+VCF=crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.polarized.nr_annovar.dm6nr_multianno_SIFTpredictions.vcf
+
+#One entry: 
+grep -v '^#' $VCF | grep 'nonsynonymous_SNV' | grep 'SIFT' | awk '!($5 ~ ",")' | awk -F";Gene\\\\.refGene=|;GeneDetail\\\\.refGene=|;AAChange\\\\.refGene=|;ALLELE_END|;SIFTINFO=|\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$9,$11,$13)}' | awk 'BEGIN{FS=OFS="\t"} {gsub(":","_", $4);gsub("\\(","_");gsub("\\)","_");print}' | awk -F"\t|:" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$10)}' | grep -v "," > ${VCF/.vcf/.clean.txt}
+#Multiple entries:
+grep -v '^#' $VCF | grep 'nonsynonymous_SNV' | grep 'SIFT' | awk '!($5 ~ ",")' | awk -F";Gene\\\\.refGene=|;GeneDetail\\\\.refGene=|;AAChange\\\\.refGene=|;ALLELE_END|;SIFTINFO=|\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$9,$11,$13)}' | awk 'BEGIN{FS=OFS="\t"} {gsub(":","_", $4);gsub("\\(","_");gsub("\\)","_");print}' | awk -F"\t|:" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$10)}' | grep "," | sed 's/,/\t/g' | awk '{for(i=6;i<=NF;i++){if($i ~ $5){printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$i)}}}' >> ${VCF/.vcf/.clean.txt}
+
+#Classify the mutations in deleterious and tolerated categories:
+module load gcc/7.2.0
+module add gcc/7.2.0
+#grep "DELETERIOUS" ${VCF/.vcf/.clean.txt} | bedtools sort > gen0-140_all_sites_missense_variants_SIFT_scores_deleterious.bed
+grep "TOLERATED" ${VCF/.vcf/.clean.txt} | awk -F"\t|\\\\|" 'BEGIN{OFS="\t"} {printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$14)}' | awk '$6>=0.20' | bedtools sort > gen0-140_all_sites_missense_variants_SIFT_scores_020tolerated.bed #34901 instead of 50774 with the default threshold 
+
+```
+
+#8. Carry out 4-fold annotation.
+##Prepare list of genes with synonymous mutations.
+```{bash}
+
+cd /share/rdata/ramon.pouso/4fold
+
+rm pools_gen0-140_unpolarised_synonymous_vcf.txt
+VCF="/share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.nr_annovar.dm6nr_multianno.vcf"
+
+#Extract list of sites which are annotated as synonymous:
+grep -e ';ExonicFunc.refGene=synonymous' $VCF >> pools_gen0-140_unpolarised_synonymous_vcf.txt
+
+#Generate list with coordinates, gene and transcript names, and nucleotid changes:
+awk -F"\t|;AAChange.refGene=|;ALLELE_END" '{printf ("%s\t%s\t%s\n", $1,$2,$9)}' pools_gen0-140_unpolarised_synonymous_vcf.txt | awk -F"\t|:|," '{printf ("%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$6)}' | awk -F"\t" '{OFS = FS} { gsub(/c\./,"", $5); print }' | grep -v "RNA" | sort -k3,3 -k1,1 -k2,2n > pools_gen0-140_unpolarised_synonymous_gene_names.txt
+
+#Sanity checks:
+cut -f3 pools_gen0-140_unpolarised_synonymous_gene_names.txt | sort -u | wc -l #12116 genes (3 less than in the previous dataset, because new genes that have been included due to the different polarisation are compensated by the exclusion of chr4 for this dataset)
+cut -f4 pools_gen0-140_unpolarised_synonymous_gene_names.txt | sort -u | wc -l #12116 transcripts
+#If the number of unique gene names and transcript names is the same, the script worked. In a previous version both numbers were different, which allowed me to discover that some genes with parenthesis in their names were introducing bugs. I modified the code to the current version, and now everything checks.
+
+```
+
+##Retrieve the whole nucleotide sequence.
+```{bash}
+
+cd /share/rdata/ramon.pouso/4fold
+
+#First generate a more readable version of the non-redundant annotation file, which keeps only necessary data, and transforms coordinates from 1-based (GTF format) to 0-based (BED format):
+#awk -F'\t|gene_id \"|"; transcript_id |; exon_id "|"; gene_name' '($1 == "chr2L" || $1 == "chr2R" || $1 == "chr3L" || $1 == "chr3R" || $1 == "chr4" || $1 == "chrX") && $3=="CDS" {printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\n"),$1,$4-1,$5,$7,$8,$10,$12}' /share/rdata/ramon.pouso/reference/indexed_reference/dm6nr.refGene.gtf > dm6nr.refGene.txt
+
+#Then cross it with the list of genes with synonymous variants to obtain coordinates for all CDS from all genes of interest. I tried to do it faster using grep -Fwf but some genes have special characters (such as "-") which are not considered part of a word, so it introduces some mistakes. So it's best to use this loop instead:
+GENES=$(cat pools_gen0-140_unpolarised_synonymous_gene_names.txt | cut -f 3 | sort -u)
+COUNTER=0
+rm pools_gen0-140_unpolarised_synonymous.cds_list.dm6nr.refGene.txt
+for gen in ${GENES[@]}
+  do
+  #echo "${gen}"
+  awk -v gene_name=$gen '$6 == gene_name' dm6nr.refGene.txt >> pools_gen0-140_unpolarised_synonymous.cds_list.dm6nr.refGene.txt
+  ((COUNTER++))
+  if [ $(( $COUNTER % 100 )) == 0 ]
+    then
+    echo "processed $COUNTER genes out of $(echo "$GENES" | wc -l)"
+  fi
+  done
+awk -F"\t" '{OFS = FS} { gsub(/chr/,"", $1); print }' pools_gen0-140_unpolarised_synonymous.cds_list.dm6nr.refGene.txt > pools_gen0-140_unpolarised_synonymous.cds_list.dm6nr.refGene.bed #Remove the "chr" from the chromosome names to convert them into the same format that the fasta uses.
+
+  ##Sanity checks:
+  cut -f6 pools_gen0-140_unpolarised_synonymous.cds_list.dm6nr.refGene.bed | uniq | wc -l #11996 genes instead of the 12117 found in pools_gen0-140_unpolarised_synonymous_gene_names.txt because some of the genes in the annovar database are not included in the UCSC .gtf file. 
+  comm -3 <(cut -f3 pools_gen0-140_unpolarised_synonymous_gene_names.txt | sort -u) <(cut -f6 pools_gen0-140_unpolarised_synonymous.cds_list.dm6nr.refGene.bed | sort -u) | wc -l #120, which is the correct result of 12116-11996 
+  comm -3 <(cut -f3 pools_gen0-140_unpolarised_synonymous_gene_names.txt | sort -u) <(cut -f6 pools_gen0-140_unpolarised_synonymous.cds_list.dm6nr.refGene.bed | sort -u) | less -S #All results are displayed in the first column, which means that all missing entries are missing in the second file, and none from the second file are missing in the first one.
+
+#Retrieve reference sequences for all CDS (from the ancestral fasta to account for polarisation).
+module load gcc/7.2.0
+module add gcc/7.2.0
+bedtools getfasta -fi /share/rdata/ramon.pouso/reference/indexed_reference/ancestral_dmel-all-chromosome-r6.14.fa -bed pools_gen0-140_unpolarised_synonymous.cds_list.dm6nr.refGene.bed -fo pools_gen0-140_unpolarised_synonymous.cds_sequence.fa
+
+  ##Sanity checks:
+  grep -v '>' pools_gen0-140_unpolarised_synonymous.cds_sequence.fa | wc -l #48442, which is the same number of CDS (lines) in the file pools_gen0-140_unpolarised_synonymous.cds_list.dm6nr.refGene.bed.
+
+#Paste each CDS' sequence with the rest of the information.
+paste pools_gen0-140_unpolarised_synonymous.cds_list.dm6nr.refGene.bed <(grep -v '>' pools_gen0-140_unpolarised_synonymous.cds_sequence.fa) > pools_gen0-140_unpolarised_synonymous.cds_list_and_sequence.dm6nr.refGene.bed
+
+  ##Sanity checks:
+  awk '{printf ("%s\t%s\n"),$3-$2,length($8)}' pools_gen0-140_unpolarised_synonymous.cds_list_and_sequence.dm6nr.refGene.bed | awk '$1==$2' | wc -l #48442, which means that all retrieved sequences have the correct length (the same as the difference between their start and their end points).
+
+#Fuse all exons from each gene and store them in a file together with the gene name and the strand information.
+GENES=$(cat pools_gen0-140_unpolarised_synonymous.cds_list_and_sequence.dm6nr.refGene.bed | cut -f 6 | sort -u)
+TOTAL=$(echo "$GENES" | wc -l)
+COUNTER=0
+rm pools_gen0-140_unpolarised_synonymous.cds_list_and_sequence_combined.dm6nr.refGene.bed
+for gen in ${GENES[@]}
+  do
+  #echo "${gen}"
+  STRAND=$(awk -F"\t" -v gen=$gen '$6 == gen' pools_gen0-140_unpolarised_synonymous.cds_list_and_sequence.dm6nr.refGene.bed | shuf -n1 | cut -f 4)
+  CODING_SEQUENCE=$(awk -F"\t" -v gen=$gen '$6 == gen {print $8}' pools_gen0-140_unpolarised_synonymous.cds_list_and_sequence.dm6nr.refGene.bed | tr -d '\n')
+  echo -e "$gen\t$STRAND\t$CODING_SEQUENCE" >> pools_gen0-140_unpolarised_synonymous.cds_list_and_sequence_combined.dm6nr.refGene.bed
+  ((COUNTER++))
+  if [ $(( $COUNTER % 50 )) == 0 ]
+    then
+    echo "processed $COUNTER genes out of $(echo "$GENES" | wc -l)"
+  fi
+  done
+
+```
+
+##Retrieve codons:
+```{bash}
+
+cd /share/rdata/ramon.pouso/4fold
+
+#First join the synonymous variants and the gene information:
+join -1 3 -2 1 <(sort -k3,3 pools_gen0-140_unpolarised_synonymous_gene_names.txt) pools_gen0-140_unpolarised_synonymous.cds_list_and_sequence_combined.dm6nr.refGene.bed | awk '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $2, $3-1, $3, $1, $4, $6, $5, $7)}' > pools_gen0-140_unpolarised_synonymous.cds_list_and_sequence_combined.complete_info.dm6nr.refGene.bed #170299
+
+#Then for each variant retrieve the codon it belongs to:
+rm pools_gen0-140_unpolarised_synonymous.cds_list_and_sequence_combined.codons.dm6nr.refGene.bed
+TOTAL=$(cat pools_gen0-140_unpolarised_synonymous.cds_list_and_sequence_combined.complete_info.dm6nr.refGene.bed | wc -l)
+COUNTER=0
+while read -r CHR START END GENE TRANSCRIPT STRAND SNP_CHANGE SEQUENCE; do
+  SNP=$(echo "${SNP_CHANGE:1:${#SNP_CHANGE}-2}")
+  if [ $STRAND == "+" ]
+    then
+    if [ $(( $SNP % 3 )) == 0 ]
+      then 
+      OLD_CODON=$(echo $SEQUENCE | cut -c$(($SNP-2))-$SNP)
+      NEW_CODON=$(echo "${OLD_CODON:0:2}${SNP_CHANGE: -1}")
+    elif [ $(( $SNP % 3 )) == 2 ]
+      then 
+      OLD_CODON=$(echo $SEQUENCE | cut -c$(($SNP-1))-$(($SNP+1)))
+      NEW_CODON=$(echo "${OLD_CODON:0:1}${SNP_CHANGE: -1}${OLD_CODON:2:3}")
+    elif [ $(( $SNP % 3 )) == 1 ]
+      then 
+      OLD_CODON=$(echo $SEQUENCE | cut -c$SNP-$(($SNP+2)))
+      NEW_CODON=$(echo "${SNP_CHANGE: -1}${OLD_CODON:1:3}")
+    fi
+  elif [ $STRAND == "-" ]
+    then
+    REVERSE_SEQUENCE=$(echo $SEQUENCE | tr ACGT TGCA | rev) #this code obtains the reverse complementary sequence
+    if [ $(( $SNP % 3 )) == 0 ]
+      then 
+      OLD_CODON=$(echo $REVERSE_SEQUENCE | cut -c$(($SNP-2))-$SNP)
+      NEW_CODON=$(echo "${OLD_CODON:0:2}${SNP_CHANGE: -1}")
+    elif [ $(( $SNP % 3 )) == 2 ]
+      then 
+      OLD_CODON=$(echo $REVERSE_SEQUENCE | cut -c$(($SNP-1))-$(($SNP+1)))
+      NEW_CODON=$(echo "${OLD_CODON:0:1}${SNP_CHANGE: -1}${OLD_CODON:2:3}")
+    elif [ $(( $SNP % 3 )) == 1 ]
+      then 
+      OLD_CODON=$(echo $REVERSE_SEQUENCE | cut -c$SNP-$(($SNP+2)))
+      NEW_CODON=$(echo "${SNP_CHANGE: -1}${OLD_CODON:1:3}")
+    fi
+  fi
+  echo -e "$CHR\t$START\t$END\t$GENE\t$TRANSCRIPT\t$STRAND\t$SNP_CHANGE\t$OLD_CODON\t$NEW_CODON" >> pools_gen0-140_unpolarised_synonymous.cds_list_and_sequence_combined.codons.dm6nr.refGene.bed
+  ((COUNTER++))
+  if [ $(( $COUNTER % 1000 )) == 0 ]
+    then
+    echo "processed $COUNTER SNPs out of" $TOTAL
+  fi
+done < pools_gen0-140_unpolarised_synonymous.cds_list_and_sequence_combined.complete_info.dm6nr.refGene.bed
+
+```
+
+##Extract 4-fold degenerate codons:
+```{bash}
+
+cd /share/rdata/ramon.pouso/4fold
+
+#First, save the list of 4-fold degenerate codons (obtained from https://github.com/seenstevo/Four-fold_degenerate_bedmaker/blob/master/FFDS_bedmaker.py) to a file:
+echo "CTT","CTA","CTG","CTC","GTT","GTC","GTA","GTG","TCT","TCC","TCA","TCG","CCT","CCC","CCA","CCG","ACT","ACC","ACA","ACG","GCT","GCC","GCA","GCG","CGT","CGC","CGA","CGG","GGT","GGC","GGA","GGG" | tr ',' '\n' > 4fold_codons.txt
+
+#Then filter the file obtained in the previous section, which contains the codon for each variant in the dataset, and filter in only those which are 4-fold degenerate (i.e., those from the 4fold file which appear both in column 8 and column 9).
+awk 'NR==FNR { A[$1]=1 ; next }; ($8 in A && $9 in A) { print }' 4fold_codons.txt pools_gen0-140_unpolarised_synonymous.cds_list_and_sequence_combined.codons.dm6nr.refGene.bed > pools_gen0-140_unpolarised_synonymous.cds_list_and_sequence_combined.4fold_codons.dm6nr.refGene.bed
+
+cut -f-4 pools_gen0-140_unpolarised_synonymous.cds_list_and_sequence_combined.4fold_codons.dm6nr.refGene.bed > pools_gen0-140_unpolarised_synonymous_variants_4fold.bed #99484
+
+#Note:
+cut -f9 pools_gen0-140_unpolarised_synonymous.cds_list_and_sequence_combined.codons.dm6nr.refGene.bed | sort -u #this reveals that there are single-letter new codons, and (see next line)...
+cut -f8 pools_gen0-140_unpolarised_synonymous.cds_list_and_sequence_combined.codons.dm6nr.refGene.bed | sort -u #this reveals that there are empty old codons.
+#After analysing this up-stream, I concluded that these aren't due to an error in these sections' code. Instead, they owe to ANNOVAR using the transcripts instead of the CDS for its annotation procedures, which results in "empty" old codons (those after the stop codon) being replaced by the single SNP change that appears in the VCF. Fortunately this doesn't interfere in the identification of 4fold degenerate codons.
+
+```
+
+#9. Import all annotations into the VCF.
+##Major isoforms version:
+```{bash}
+
+module load gcc/7.2.0
+module add gcc/7.2.0
+
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/
+
+VCF=crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.nr_annovar.dm6nr_multianno.vcf
+
+rm ${VCF/vcf/nr_major.custom_unsorted.vcf}
+#Fourfold:
+bedtools intersect -a $VCF -b /share/rdata/ramon.pouso/4fold/pools_gen0-140_unpolarised_synonymous_variants_4fold.bed | awk '{gsub("NP=44;","CUSTOM=fourfold;NP=44;"); print}' >> ${VCF/vcf/nr_major.custom_unsorted.vcf}
+#Tolerated:
+bedtools intersect -a $VCF -b gen0-140_all_sites_unpolarised_nr_major_missense_variants_SIFT_scores_tolerated.bed | awk '{gsub("NP=44;","CUSTOM=tolerated;NP=44;"); print}' >> ${VCF/vcf/nr_major.custom_unsorted.vcf}
+#Deleterious:
+bedtools intersect -a $VCF -b gen0-140_all_sites_unpolarised_nr_major_missense_variants_SIFT_scores_deleterious.bed | awk '{gsub("NP=44;","CUSTOM=deleterious;NP=44;"); print}' >> ${VCF/vcf/nr_major.custom_unsorted.vcf}
+#LoF:
+grep -E ';ExonicFunc.refGene=stopgain;|;ExonicFunc.refGene=stoploss;' $VCF | awk '{gsub("NP=44;","CUSTOM=LoF;NP=44;"); print}' >> ${VCF/vcf/nr_major.custom_unsorted.vcf}
+
+#Sort the VCF and add the headers:
+cat <(grep "^#" $VCF) <(sort -k1,1 -k2,2n ${VCF/vcf/nr_major.custom_unsorted.vcf}) > ${VCF/vcf/nr_major.custom.vcf}
+
+```
+
+##Random isoforms version:
+```{bash}
+
+module load gcc/7.2.0
+module add gcc/7.2.0
+
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/
+
+VCF=crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.nr_annovar.dm6nr_multianno.vcf
+
+rm ${VCF/vcf/nr_random.custom_unsorted.vcf}
+#Fourfold:
+bedtools intersect -a $VCF -b /share/rdata/ramon.pouso/4fold/pools_gen0-140_unpolarised_synonymous_variants_4fold.bed | awk '{gsub("NP=44;","CUSTOM=fourfold;NP=44;"); print}' >> ${VCF/vcf/nr_random.custom_unsorted.vcf}
+#Tolerated:
+bedtools intersect -a $VCF -b gen0-140_all_sites_unpolarised_nr_random_missense_variants_SIFT_scores_tolerated.bed | awk '{gsub("NP=44;","CUSTOM=tolerated;NP=44;"); print}' >> ${VCF/vcf/nr_random.custom_unsorted.vcf}
+#Deleterious:
+bedtools intersect -a $VCF -b gen0-140_all_sites_unpolarised_nr_random_missense_variants_SIFT_scores_deleterious.bed | awk '{gsub("NP=44;","CUSTOM=deleterious;NP=44;"); print}' >> ${VCF/vcf/nr_random.custom_unsorted.vcf}
+#LoF:
+grep -E ';ExonicFunc.refGene=stopgain;|;ExonicFunc.refGene=stoploss;' $VCF | awk '{gsub("NP=44;","CUSTOM=LoF;NP=44;"); print}' >> ${VCF/vcf/nr_random.custom_unsorted.vcf}
+
+#Sort the VCF and add the headers:
+cat <(grep "^#" $VCF) <(sort -k1,1 -k2,2n ${VCF/vcf/nr_random.custom_unsorted.vcf}) > ${VCF/vcf/nr_random.custom.vcf}
+
+
+
+#Version with more sites:
+VCF=crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.nr_annovar.dm6nr_multianno.vcf
+
+rm ${VCF/vcf/nr_random.custom_unsorted.vcf}
+#Fourfold:
+bedtools intersect -a $VCF -b /share/rdata/ramon.pouso/4fold/pools_gen0-140_unpolarised_synonymous_variants_4fold.bed | awk '{gsub("NP=44;","CUSTOM=fourfold;NP=44;"); print}' >> ${VCF/vcf/nr_random.custom_unsorted.vcf}
+#Tolerated:
+bedtools intersect -a $VCF -b gen0-140_all_sites_unpolarised_extra_nr_random_missense_variants_SIFT_scores_tolerated.bed | awk '{gsub("NP=44;","CUSTOM=tolerated;NP=44;"); print}' >> ${VCF/vcf/nr_random.custom_unsorted.vcf}
+#Deleterious:
+bedtools intersect -a $VCF -b gen0-140_all_sites_unpolarised_extra_nr_random_missense_variants_SIFT_scores_deleterious.bed | awk '{gsub("NP=44;","CUSTOM=deleterious;NP=44;"); print}' >> ${VCF/vcf/nr_random.custom_unsorted.vcf}
+#LoF:
+grep -E ';ExonicFunc.refGene=stopgain;|;ExonicFunc.refGene=stoploss;' $VCF | awk '{gsub("NP=44;","CUSTOM=LoF;NP=44;"); print}' >> ${VCF/vcf/nr_random.custom_unsorted.vcf}
+
+#Sort the VCF and add the headers:
+cat <(grep "^#" $VCF) <(sort -k1,1 -k2,2n ${VCF/vcf/nr_random.custom_unsorted.vcf}) > ${VCF/vcf/nr_random.custom.vcf}
+
+```
+
+#10. Split the VCFs at the pool level:
+##Exclude non-variants:
+```{R, engine='bash'}
+
+TRANSCRIPTS="nr_random" #nr_major #nr_random
+VCF="/share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.nr_annovar.dm6nr_multianno."$TRANSCRIPTS".custom.vcf" #"/share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.nr_annovar.dm6nr_multianno."$TRANSCRIPTS".custom.vcf"
+
+if [ $VCF == "/share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.nr_annovar.dm6nr_multianno."$TRANSCRIPTS".custom.vcf" ]
+  then COUNTS="counts"
+elif [ $VCF == "/share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.nr_annovar.dm6nr_multianno."$TRANSCRIPTS".custom.vcf" ]
+  then COUNTS="extra_counts"
+fi
+
+mkdir -p /share/rdata/ramon.pouso/POOLS/all_gens_0_140/$COUNTS/
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/$COUNTS/
+module load bcftools/1.9
+
+POOLS=$(bcftools query -l "${VCF}")
+for p in ${POOLS[@]}
+  do
+  echo "${p}"
+  #ID=$(echo "${p}")
+  #POOL_NAME=$(echo "${p}")
+  SAMPLE=$(echo "${p}" | cut -d'_' -f1 | sort | uniq)
+  FIELD_NUMBER=$(grep "^#" $VCF | grep -v '##' | tr "\t" "\n" | grep -nw $p | cut -d':' -f1)
+  if [[ "$SAMPLE" == "sample"* ]]
+    then
+    GEN=$(echo "${p}" | tr "_" "\n" | grep "gen")
+    paste <(grep -v '^#' $VCF | awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5,$6,$7,$8)}') <(grep -v '^#' $VCF | cut -f$FIELD_NUMBER | awk -F":|," '{printf ("%s\t%s\n", $4+$6+$8,$5+$7+$9)}') | awk '$11 > 0' > "${SAMPLE}"_"${GEN}"_gen0-140_pool.$TRANSCRIPTS.txt
+    else
+    paste <(grep -v '^#' $VCF | awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5,$6,$7,$8)}') <(grep -v '^#' $VCF | cut -f$FIELD_NUMBER | awk -F":|," '{printf ("%s\t%s\n", $4+$6+$8,$5+$7+$9)}') | awk '$11 > 0' > "${SAMPLE}"_gen0-140_pool.$TRANSCRIPTS.txt
+  fi
+  done
+
+mv LBT0_gen0-140_pool.$TRANSCRIPTS.txt LBT0_gen0_gen0-140_pool.$TRANSCRIPTS.txt
+mv c1_gen0-140_pool.$TRANSCRIPTS.txt c1_gen5_gen0-140_pool.$TRANSCRIPTS.txt
+mv BT20_gen0-140_pool.$TRANSCRIPTS.txt BT20_gen20_gen0-140_pool.$TRANSCRIPTS.txt
+mv BT30_gen0-140_pool.$TRANSCRIPTS.txt BT30_gen30_gen0-140_pool.$TRANSCRIPTS.txt
+mv c2_gen0-140_pool.$TRANSCRIPTS.txt c2_gen40_gen0-140_pool.$TRANSCRIPTS.txt
+mv C1_gen0-140_pool.$TRANSCRIPTS.txt C1_gen140_gen0-140_pool.$TRANSCRIPTS.txt
+
+```
+
+#11. Retrieve counts.
+##Exclude non-variants VCFs:
+###All, autosomes or Xchr sites:
+```{R, engine='bash'}
+
+REGION="all" #all #autosomes #Xchr
+TRANSCRIPTS="nr_random" #nr_major #nr_random
+VCF="/share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.nr_annovar.dm6nr_multianno."$TRANSCRIPTS".custom.vcf" #"/share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.nr_annovar.dm6nr_multianno."$TRANSCRIPTS".custom.vcf"
+
+if [ $VCF == "/share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.nr_annovar.dm6nr_multianno."$TRANSCRIPTS".custom.vcf" ]
+  then COUNTS="counts"
+elif [ $VCF == "/share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.nr_annovar.dm6nr_multianno."$TRANSCRIPTS".custom.vcf" ]
+  then COUNTS="extra_counts"
+fi
+
+module load gcc/7.2.0
+module add gcc/7.2.0
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/$COUNTS/
+rm ${COUNTS}_pool_gen0-140_${REGION}_summary.$TRANSCRIPTS.txt
+echo -e "sample\tgeneration\tfourfold_V\tfourfold_D\ttolerated_V\ttolerated_D\tdeleterious_V\tdeleterious_D\tLoF_V\tLoF_D" > ${COUNTS}_pool_gen0-140_${REGION}_summary.$TRANSCRIPTS.txt
+POOL_LIST=($(ls -v `find . -name '*_gen0-140_pool.'$TRANSCRIPTS'.txt' -print`))
+for pool in "${POOL_LIST[@]}"
+  do
+  echo "${pool}"
+  SAMPLE=$(echo "${pool}" | cut -d'/' -f2 | cut -d'_' -f1)
+  GEN=$(echo "${pool}" | cut -d'/' -f2 | cut -d'_' -f2)
+  if [ $REGION == "autosomes" ]
+    then
+    grep -v "^X" $pool > ${pool/.$TRANSCRIPTS.txt/_${REGION}.$TRANSCRIPTS.txt}
+    p=${pool/.$TRANSCRIPTS.txt/_${REGION}.$TRANSCRIPTS.txt}
+  elif [ $REGION == "Xchr" ]
+    then
+    grep "^X" $pool > ${pool/.$TRANSCRIPTS.txt/_${REGION}.$TRANSCRIPTS.txt}
+    p=${pool/.$TRANSCRIPTS.txt/_${REGION}.$TRANSCRIPTS.txt}
+  elif [ $REGION == "all" ]
+    then
+    p=${pool}
+  fi
+  FOURFOLD_V=$(grep "CUSTOM=fourfold;" $p | wc -l)
+  FOURFOLD_D=$(grep "CUSTOM=fourfold;" $p | awk '{print $11}' | paste -sd+ | bc)
+  MISTOL_V=$(grep "CUSTOM=tolerated;" $p | wc -l)
+  MISTOL_D=$(grep "CUSTOM=tolerated;" $p | awk '{print $11}' | paste -sd+ | bc)
+  MISDEL_V=$(grep "CUSTOM=deleterious;" $p | wc -l)
+  MISDEL_D=$(grep "CUSTOM=deleterious;" $p | awk '{print $11}' | paste -sd+ | bc)
+  LOF_V=$(grep "CUSTOM=LoF;" $p | wc -l)
+  LOF_D=$(grep "CUSTOM=LoF;" $p | awk '{print $11}' | paste -sd+ | bc)
+  echo -e "$SAMPLE\t$GEN\t$FOURFOLD_V\t$FOURFOLD_D\t$MISTOL_V\t$MISTOL_D\t$MISDEL_V\t$MISDEL_D\t$LOF_V\t$LOF_D" >> ${COUNTS}_pool_gen0-140_${REGION}_summary.$TRANSCRIPTS.txt
+  done
+
+#From the local environment:
+REGION="all" #all #autosomes #Xchr
+TRANSCRIPTS="nr_random" #nr_major #nr_random
+VCF="/share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.nr_annovar.dm6nr_multianno."$TRANSCRIPTS".custom.vcf" #"/share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.nr_annovar.dm6nr_multianno."$TRANSCRIPTS".custom.vcf"
+
+if [ $VCF == "/share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.nr_annovar.dm6nr_multianno."$TRANSCRIPTS".custom.vcf" ]
+  then COUNTS="counts"
+elif [ $VCF == "/share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.nr_annovar.dm6nr_multianno."$TRANSCRIPTS".custom.vcf" ]
+  then COUNTS="extra_counts"
+fi
+scp ramon.pouso@rua2.uvigo.es://share/rdata/ramon.pouso/POOLS/all_gens_0_140/$COUNTS/${COUNTS}_pool_gen0-140_${REGION}_summary.$TRANSCRIPTS.txt /Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/all_sites/gen0-140/
+
+#There are generally less LoF sites and counts in the new dataset (even though there are more sites in general and in the other categories). The reason seems to be that for the old dataset I used the whole annovar dataset instead of the nr one, and that one seems to assign more LoF than the nr one, which more than make up for the fewer overall sites.
+
+```
+
+#12. Plot counts.
+##Derived count ratios (relative to 4fold and Pb-000):
+###Pb and line averages (combined version):
+```{r Plot variant count results}
+
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(scales)
+
+
+type <- "all" #all #autosomes #Xchr
+transcripts <- "nr_random" #nr_major #nr_random
+counts <- "extra_counts" #counts #extra_counts
+
+wd_path <- ("/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/all_sites/gen0-140/")
+pool_counts <- read_tsv(paste0(wd_path,counts,"_pool_gen0-140_",type,"_summary.",transcripts,".txt")) 
+
+codes_dictionary <- read_tsv(paste0(wd_path,"pop_codes_dictionary.txt"),col_names=c("old","population"))
+pool_counts <- left_join(pool_counts,codes_dictionary,by=c("sample"="old"))
+pool_counts$population = factor(pool_counts$population,levels=c("Pb","L01","L16","L27","L29","L31","L33","L34","L36","L38","L39","L42","L45","L48","L51","L52","L54","L59","L61","L63"))
+pool_counts$generation <- as.numeric(gsub("gen","",pool_counts$generation))
+pool_counts <- pool_counts %>% arrange(generation)
+pool_counts$generation = factor(pool_counts$generation)
+pool_counts <- pool_counts %>% arrange(population,generation)
+
+pool_counts_copies_4FR <- pool_counts %>% mutate(fourfold=fourfold_D/fourfold_D,tolerated=tolerated_D/fourfold_D,deleterious=deleterious_D/fourfold_D,LoF=LoF_D/fourfold_D) %>% select(!contains(c("_V","_D","sample"))) %>% gather(ratio,value,-generation,-population,factor_key=T)
+pool_counts_copies_4FR
+
+r_average_vector <- c()
+for (r in unique(pool_counts_copies_4FR$ratio)) {
+  print(r)
+  r_average <- filter(pool_counts_copies_4FR,r==ratio & population=="Pb" & generation==0) %>% select(value) %>% unlist(.,use.names=F) %>% mean()
+  r_average_vector <- c(r_average_vector,rep(r_average,nrow(filter(pool_counts_copies_4FR,r==ratio))))
+}
+print(r_average_vector)
+
+relativised_pool_counts_copies_4FR <- mutate(pool_counts_copies_4FR, Pb_relative_value=value/r_average_vector, group=ifelse(population=="Pb","Pb","lines"))
+relativised_pool_counts_copies_4FR$group = factor(relativised_pool_counts_copies_4FR$group,levels=c("Pb","lines"))
+
+#Obtain per population averages and standard errors:
+se <- function(x) sqrt(var(x)/length(x)) #first define the standard error function
+
+average_relativised_pool_counts_copies_4FR <- data_frame("population"=character(0),"generation"=character(0),"ratio"=character(0),"avg_Pb_relative_value"=character(0),"se_Pb_relative_value"=character(0)) #next, create the empty dataframe
+
+for (pop in unique(relativised_pool_counts_copies_4FR$group)) { #then loop over each population and feature to get the (relativised) mean and standard error, and feed the dataframe
+  print(pop)
+  for (g in unlist(unique(select(filter(relativised_pool_counts_copies_4FR,group==pop),generation)),use.names=F)) {
+  #species <- filter(relativised_pool_counts_copies_4FR,ratio==r & population==pop) %>% select(species) %>% unlist(.,use.names=F) %>% unique()
+    for (r in unique(relativised_pool_counts_copies_4FR$ratio)) {
+      print(r)
+      pop_mean <- filter(relativised_pool_counts_copies_4FR,ratio==r & generation==g & group==pop) %>% select(Pb_relative_value) %>% unlist(.,use.names=F) %>% mean()
+      #print(paste0(pop," feature ",r," average is ",pop_mean))
+      pop_se <- filter(relativised_pool_counts_copies_4FR,ratio==r & generation==g & group==pop) %>% select(Pb_relative_value) %>% unlist(.,use.names=F) %>% se()
+      #print(paste0(pop," feature ",r," std error is ",pop_se))
+      row_data <- cbind(pop,g,r,pop_mean,pop_se)
+      colnames(row_data) <- c("population","generation","ratio","avg_Pb_relative_value","se_Pb_relative_value")
+      average_relativised_pool_counts_copies_4FR <- rbind(average_relativised_pool_counts_copies_4FR,row_data,stringsAsFactors=F)
+    }
+  }
+}
+average_relativised_pool_counts_copies_4FR$population = factor(average_relativised_pool_counts_copies_4FR$population,levels=c("Pb","lines"))
+average_relativised_pool_counts_copies_4FR$ratio = factor(average_relativised_pool_counts_copies_4FR$ratio,levels=c("fourfold","tolerated","deleterious","LoF"))
+average_relativised_pool_counts_copies_4FR$generation <- as.factor(as.numeric(average_relativised_pool_counts_copies_4FR$generation))
+average_relativised_pool_counts_copies_4FR$avg_Pb_relative_value <- as.numeric(average_relativised_pool_counts_copies_4FR$avg_Pb_relative_value)
+average_relativised_pool_counts_copies_4FR$se_Pb_relative_value <- as.numeric(average_relativised_pool_counts_copies_4FR$se_Pb_relative_value)
+average_relativised_pool_counts_copies_4FR
+#write_tsv(average_relativised_pool_counts_copies_4FR,paste0(wd_path,"/pop_average_relativised_pool_counts_copies_4FR_",type,".txt"))
+
+
+#Combined version:
+Pb_lines_relativised_pool_counts_copies_4FR_ggplot <- ggplot(data=filter(average_relativised_pool_counts_copies_4FR,ratio!="fourfold", generation!=5), aes(generation,avg_Pb_relative_value)) +
+  #facet_wrap(feature ~ species,nrow=6,ncol=2,scales="free") +
+  facet_grid(. ~ ratio) +
+  geom_errorbar(aes(ymin=avg_Pb_relative_value-2*se_Pb_relative_value, ymax=avg_Pb_relative_value+2*se_Pb_relative_value, colour=generation, group=population), position=position_dodge(0.8),size=0.5,width=0.5) +
+  geom_point(aes(colour=generation,shape=population),size=2,position=position_dodge(0.8)) + 
+  #ggtitle("Proportion of reads at different NM") +
+  ylab("Derived count relative to Pb-000") +
+  scale_y_continuous(breaks = seq(0.6, 1.0, by = 0.1)) +
+  scale_shape_manual(values=c(1,16)) +
+  ylim(0.6,1.1) +
+  ggtitle("Pools") +
+  guides(colour="none") +
+  theme_bw() +
+  theme(text=element_text(size=12,face="bold"),
+        rect=element_rect(size=1),
+        axis.line=element_line(colour="black"),
+        axis.title=element_text(size=16),
+        axis.text=element_text(size=10,colour="black"),
+        axis.text.x=element_text(colour="black",size=10),
+        #axis.text.y=element_text(size=24,colour="black",margin=margin(t=0.5,unit="cm")),
+        #axis.title.y=element_text(size=30,margin=margin(r=0.5,unit="cm")),
+        panel.background=element_blank(),
+        panel.border=element_rect(colour="black"),
+        #panel.grid=element_blank(),
+        #panel.grid.major=element_line(colour="grey", linetype="dashed", size=0.4),
+        plot.margin=unit(c(0.5,0.5,0.5,0.5),"cm"),
+        #plot.title=element_text(size=36, face="bold", margin=margin(b=0.5, unit="cm")),
+        legend.background=element_rect(linetype="solid", colour="black", size=.5),
+        #legend.justification=c(0,0),
+        legend.key=element_rect(colour="white"),
+        #legend.key.size=unit(1.3,"cm"),
+        #legend.position="none",
+        legend.title=element_blank()
+  )
+Pb_lines_relativised_pool_counts_copies_4FR_ggplot
+ggsave(paste0("Pb_lines_relativised_pool_",counts,"_copies_4FR_",type,".",transcripts,".pdf"), width=15, height=12, units="cm", device="pdf", path=wd_path)
+
+```
