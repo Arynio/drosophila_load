@@ -170,7 +170,8 @@ done < $SCAFFOLDS
 
 #3. Prepare SNP dataset:
 ##Filter base population VCF files:
-###Autosomic:
+###Gen 0-40 VCF:
+####Autosomic:
 ```{R, engine='bash'}
 
 #First we'll retrieve all sites with depth higher than the average + 3SD for each of the following pools: gen0, gen20, and gen30 of the base population. Then we'll retrieve sites with the flag EMfail. Finally we'll filter them out from the VCF.
@@ -206,7 +207,7 @@ bedtools subtract -a CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.v
 
 ```
 
-###Xchr:
+####Xchr:
 ```{R, engine='bash'}
 
 #First we'll retrieve all sites with depth higher than the average + 3SD for each of the following pools: gen0, gen20, and gen30 of the base population. Then we'll retrieve sites with the flag EMfail. Finally we'll filter them out from the VCF.
@@ -241,6 +242,15 @@ module add gcc/7.2.0
 bedtools subtract -a CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.vcf -b CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.DP_EM_filter_sorted.bed -header > CRISP_x/masked/crisp_multi_all_x_masked.recode_snps.DP_EM_filtered.vcf
 
 ```
+
+###Gen 0-140 VCF:
+####All sites:
+```{R, engine='bash'}
+
+#Go to the all_sites_pipeline.Rmd script.
+
+```
+
 
 ##Retrieve SNP coordinates of interest:
 ###Polymorphic sites from the base population, gens 0, 20 and 30:
@@ -582,7 +592,7 @@ bedtools intersect -a final_snp_set.orthologs.sum_gen0_gen20_gen30_allele_counts
 
 #Check: it has 1101074 lines (positions), so it's correct.
 
-grep $'\t'"0,0,0,0" final_snp_set.orthologs.joined_counts.bed | wc -l #it has 347707 (31.58%) sites with no info in at least one outgroup, of which 92448 (8.4%) have no info in simulans, and 332214 (30.2%) have no info in yakuba. 76955 have no info in either outgroup, and 753367 have all info. 270752 (24.6%) are missing info in one outgroup but not the other (these are the ones that will be kept for the est-sfs analysis, together with those with no missing info).
+grep $'\t'"0,0,0,0" final_snp_set.orthologs.joined_counts.bed | wc -l #it has 347707 (31.58%) sites with no info in at least one outgroup, of which 92448 (8.4%) have no info in simulans, and 332214 (30.2%) have no info in yakuba. 76955 have no info in either outgroup, and 753367 have all info. 270752 (24.6%) are missing info in one outgroup but not the other (these are the ones that will be kept for the est-sfs analysis, together with those with no missing info, which comprise 93.01% of all sites in the file).
 
 ```
 
