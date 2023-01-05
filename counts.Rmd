@@ -146,6 +146,10 @@ mv crisp_all_gen140_x_masked.recode_snps.recode.vcf crisp_all_gen140_x_masked.re
 
 #Monomorphic sites in gen 140 are missing from the VCF, and from these some are ancestral but some are derived, and are missing from the counts. It's easy to determine which are which because they are already polarized in the gens0-40 VCF. However, because we are dealing with pools and not individuals, we can't simply add two copies for each of these sites and call it a day; instead we need to retrieve the actual number of reads supporting each allele, as provided by CRISP. Thus, the best solution is to perform a joint calling (including all pools from gens0-40 and gen 140) for the subset of sites missing from the gen140 VCF which are fixed for the derived allele. For the SFS or to calculate the proportion of derived/total reads, it's enough to know the number of lost (AF=0) and fixed (AF=1) sites per category.
 
+#However, the -bed flag in CRISP is not working, which means it's not possible to launch the calling for the target sites. So instead, I'll launch it for all sites (for each chromosome separately), as detailed in the next section.
+
+#Eventually this functionality was apparently included after I opened an issue on their github, but I didn't test it.
+
 ```
 
 ####Extract target sites:
@@ -297,7 +301,9 @@ $(for bam in $BAMLIST; do echo --bam ${bam}" "; done) -p 80 > all_gen0-140_sites
 ####README:
 ```{R, engine='bash'}
 
-#The -bed flag in CRISP is not working. So I'll launch it for all sites (for each chromosome separately).
+#The -bed flag in CRISP is not working, which means it's not possible to launch the calling for the target sites. So instead, I'll launch it for all sites (for each chromosome separately).
+
+#Eventually this functionality was apparently included after I opened an issue on their github, but I didn't test it.
 
 ```
 
@@ -395,6 +401,7 @@ $(for bam in $BAMLIST; do echo --bam ${bam}" "; done) -p 80 > crisp_all_pools_ge
 ```
 
 ####Combine, process, polarise and annotate the VCFs:
+#####Pb-000 variable sites only:
 ```{bash}
 
 module load bcftools/1.9
@@ -439,6 +446,135 @@ sed -i 's/Description=" >/Description=">/g' crisp_all_pools_gen0-140.recode_snps
 
 #Fill the VCF with the ancestral alleles:
 /share/rdata/ramon.pouso/Scripts/fill-aa.sh crisp_all_pools_gen0-140.recode_snps.gen0-140_Pb_0_variable_set.orthologs.confident.vcf
+
+#Polarize the VCF:
+FILE=crisp_all_pools_gen0-140.recode_snps.gen0-140_Pb_0_variable_set.orthologs.confident.aafilled.vcf
+N_IND=$(bcftools query -l $FILE | wc -l)
+ID_FIRST=$(bcftools query -l $FILE | head -n1)
+N_FIRST=$(grep -v '##' $FILE | grep '#' | tr "\t" "\n" | grep -n $ID_FIRST | cut -d':' -f1)
+grep -v '#' $FILE | awk -F"\t|AA=" '$4==$9' > ${FILE/.vcf/.consistent.vcf}
+grep -v '#' $FILE | awk -F"\t|AA=" '$5==$9' | awk -F";AF=|;EMstats=" '{printf ("%s;AF=%s;EMstats=%s\n", $1,1-$2,$3)}' > ${FILE/.vcf/.inconsistent.vcf}
+cut -f-$((N_FIRST-1)) ${FILE/.vcf/.inconsistent.vcf} | awk '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$5,$4,$6,$7,$8,$9,$10)}' > ${FILE/.vcf/.inconsistent.polarized.vcf}
+for col in $(seq $N_FIRST $((N_FIRST+N_IND-1)))
+  do
+  echo "processing individual in column number" $col
+  paste ${FILE/.vcf/.inconsistent.polarized.vcf} <(cut -f$col ${FILE/.vcf/.inconsistent.vcf} | awk -F":|," '{printf ("%s:%s:%s:%s,%s:%s,%s:%s,%s\n", $1,$2,$3,$5,$4,$7,$6,$9,$8)}') > ${FILE/.vcf/.inconsistent.temp}
+  mv ${FILE/.vcf/.inconsistent.temp} ${FILE/.vcf/.inconsistent.polarized.vcf}
+  done
+cat <(grep '#' $FILE) ${FILE/.vcf/.consistent.vcf} ${FILE/.vcf/.inconsistent.polarized.vcf} | bcftools sort > ${FILE/.aafilled.vcf/.polarized.vcf}
+
+#Annotate the VCF, non-redundant:
+##First convert from VCF to table (annovar can't deal with the particular format of the pool VCFs). This was already created in the complete version, so there is no need to run it again.
+FILE=crisp_all_pools_gen0-140.recode_snps.gen0-140_Pb_0_variable_set.orthologs.confident.polarized.vcf
+convert2annovar.pl -format vcf4old --outfile ${FILE/.vcf/.annovar} $FILE
+##Next, annotate the table. The resulting file is automatically labelled as .vcf by the programme, even though it really isn't a VCF.
+table_annovar.pl ${FILE/.vcf/.annovar} /share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/nr_ancestral_dm6 -vcfinput --outfile ${FILE/.vcf/.nr_annovar} -buildver dm6nr --protocol refGene --operation g
+##Convert the annotated table to a .bed.
+mv ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.vcf ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.tab
+awk -F"\t|;ANNOVAR_DATE" '{printf ("%s\t%s\t%s\tANNOVAR_DATE%s\n"),$1,$2-1,$3,$9}' ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.tab > ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.bed
+##Then intersect the polarized VCF with the annotated BED and edit it to obtain the annotated VCF:
+grep '^#' $FILE > ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.vcf
+bedtools intersect -a $FILE -b ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.bed -wb | awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s;%s\n"),$1,$2-1,$2,$3,$4,$5,$6,$7,$8,$NF}' | bedtools intersect -a stdin -b $FILE -wb | cut -f1,3-9,18- >> ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.vcf
+
+#Annotate the VCF, complete:
+##Next, annotate the table. The resulting file is automatically labelled as .vcf by the programme, even though it really isn't a VCF.
+table_annovar.pl ${FILE/.vcf/.annovar} /share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/ancestral_dm6 -vcfinput --outfile ${FILE/.vcf/.annovar} -buildver dm6 --protocol refGene --operation g
+##Convert the annotated table to a .bed.
+mv ${FILE/.vcf/.annovar}.dm6_multianno.vcf ${FILE/.vcf/.annovar}.dm6_multianno.tab
+awk -F"\t|;ANNOVAR_DATE" '{printf ("%s\t%s\t%s\tANNOVAR_DATE%s\n"),$1,$2-1,$3,$9}' ${FILE/.vcf/.annovar}.dm6_multianno.tab > ${FILE/.vcf/.annovar}.dm6_multianno.bed
+##Then intersect the polarized VCF with the annotated BED and edit it to obtain the annotated VCF:
+grep '^#' $FILE > ${FILE/.vcf/.annovar}.dm6_multianno.vcf
+bedtools intersect -a $FILE -b ${FILE/.vcf/.annovar}.dm6_multianno.bed -wb | awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s;%s\n"),$1,$2-1,$2,$3,$4,$5,$6,$7,$8,$NF}' | bedtools intersect -a stdin -b $FILE -wb | cut -f1,3-9,18- >> ${FILE/.vcf/.annovar}.dm6_multianno.vcf
+
+```
+
+#####All sites:
+```{bash}
+
+module load bcftools/1.9
+module load gcc/7.2.0
+module add gcc/7.2.0
+module load vcftools/0.1.17
+module load annovar/4.19
+
+#I moved everything to the following folder:
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants
+
+#First, extract the common part of the sample names:
+bcftools query -l crisp_all_pools_gen0-140_autosomes.vcf | rev | cut -d'_' -f2- | rev > sample_names.list
+
+#Next, fix the sample names, and compress and index the VCFs:
+##2L:
+bcftools reheader --samples sample_names.list crisp_all_pools_gen0-140_2L.vcf | /DATA/APPS/freebayes/25.03.19/SeqLib/htslib/bgzip -c > crisp_all_pools_gen0-140_2L.vcf.gz
+/DATA/APPS/freebayes/25.03.19/SeqLib/htslib/tabix -p vcf crisp_all_pools_gen0-140_2L.vcf.gz
+##2R:
+bcftools reheader --samples sample_names.list crisp_all_pools_gen0-140_2R.vcf | /DATA/APPS/freebayes/25.03.19/SeqLib/htslib/bgzip -c > crisp_all_pools_gen0-140_2R.vcf.gz
+/DATA/APPS/freebayes/25.03.19/SeqLib/htslib/tabix -p vcf crisp_all_pools_gen0-140_2R.vcf.gz
+##3L:
+bcftools reheader --samples sample_names.list crisp_all_pools_gen0-140_3L.vcf | /DATA/APPS/freebayes/25.03.19/SeqLib/htslib/bgzip -c > crisp_all_pools_gen0-140_3L.vcf.gz
+/DATA/APPS/freebayes/25.03.19/SeqLib/htslib/tabix -p vcf crisp_all_pools_gen0-140_3L.vcf.gz
+##3R:
+bcftools reheader --samples sample_names.list crisp_all_pools_gen0-140_3R.vcf | /DATA/APPS/freebayes/25.03.19/SeqLib/htslib/bgzip -c > crisp_all_pools_gen0-140_3R.vcf.gz
+/DATA/APPS/freebayes/25.03.19/SeqLib/htslib/tabix -p vcf crisp_all_pools_gen0-140_3R.vcf.gz
+##X:
+bcftools reheader --samples sample_names.list crisp_all_pools_gen0-140_Xchr.vcf | /DATA/APPS/freebayes/25.03.19/SeqLib/htslib/bgzip -c > crisp_all_pools_gen0-140_Xchr.vcf.gz
+/DATA/APPS/freebayes/25.03.19/SeqLib/htslib/tabix -p vcf crisp_all_pools_gen0-140_Xchr.vcf.gz
+
+#Next, concatenate all files and keep only those sites within the previously selected orthologous regions.
+bcftools concat crisp_all_pools_gen0-140_2L.vcf.gz crisp_all_pools_gen0-140_2R.vcf.gz crisp_all_pools_gen0-140_3L.vcf.gz crisp_all_pools_gen0-140_3R.vcf.gz crisp_all_pools_gen0-140_Xchr.vcf.gz | bedtools intersect -a stdin -b /share/rdata/ramon.pouso/outgroups/orthologs/dmel_dsim_dyak_orthologs.db_coord_sorted_merged.bed -header > crisp_all_pools_gen0-140.all_sites.orthologs.confident.vcf
+
+#Keep only biallelic SNPs:
+vcftools --vcf crisp_all_pools_gen0-140.all_sites.orthologs.confident.vcf --remove-indels --recode --recode-INFO-all --out crisp_all_pools_gen0-140.recode_snps.gen0-140_all_sites.orthologs.confident.vcf
+grep '^#' crisp_all_pools_gen0-140.recode_snps.gen0-140_all_sites.orthologs.confident.vcf.recode.vcf > crisp_all_pools_gen0-140.recode_snps.gen0-140_all_sites.orthologs.confident.vcf
+grep -v '^#' crisp_all_pools_gen0-140.recode_snps.gen0-140_all_sites.orthologs.confident.vcf.recode.vcf | awk '!($5 ~ /,/) { print }' >> crisp_all_pools_gen0-140.recode_snps.gen0-140_all_sites.orthologs.confident.vcf
+
+#And edit some problematic spaces in the header (otherwise vcftools won't be able to deal with them later on):
+sed -i 's/Description=" >/Description=">/g' crisp_all_pools_gen0-140.recode_snps.gen0-140_all_sites.orthologs.confident.vcf
+
+#Mask variant files to remove repetitive regions:
+qsub -cwd -l h=compute-0-9 /share/rdata/ramon.pouso/Scripts/vcf_mask_bed.sh crisp_all_pools_gen0-140.recode_snps.gen0-140_all_sites.orthologs.confident.vcf crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident /share/rdata/ramon.pouso/reference/indexed_reference/dmel-r6.14_mask.bed
+
+mv crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.recode.vcf crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.vcf
+
+
+COPY THIS SECTION TO A NEW SCRIPT INSTEAD.
+
+#First we'll retrieve all sites with depth higher than the average + 3SD for each of the following pools: gen0, gen20, and gen30 of the base population. Then we'll retrieve sites with the flag EMfail. Finally we'll filter them out from the VCF.
+
+cd /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/
+rm CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.DP_EM_filter_raw.bed
+touch CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.DP_EM_filter_raw.bed
+##DP Gen 0:
+AVG=$(grep "mean coverageData" /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/qualitycontrol/LBT0_new_gen0_bwa_iso_rmdup_mq30_rg_multirealigned_autosomic_stats/genome_results.txt | awk -F"= |X" '{printf ("%s\n",$2)}')
+SD=$(grep "std coverageData" /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/qualitycontrol/LBT0_new_gen0_bwa_iso_rmdup_mq30_rg_multirealigned_autosomic_stats/genome_results.txt | awk -F"= |X" '{printf ("%s\n",$2)}')
+FILTER=$(echo $AVG + 3*$SD | bc)
+grep -v '#' CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.vcf | cut -f-2,12 | awk -v filter="$FILTER" -F"\t|:" '{if ($5 >= filter) printf ("%s\t%s\t%s\n", $1,$2-1,$2)}' >> CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.DP_EM_filter_raw.bed
+##DP Gen 20:
+AVG=$(grep "mean coverageData" /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/qualitycontrol/BT20_new_gen20_bwa_iso_rmdup_mq30_rg_multirealigned_autosomic_stats/genome_results.txt | awk -F"= |X" '{printf ("%s\n",$2)}')
+SD=$(grep "std coverageData" /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/qualitycontrol/BT20_new_gen20_bwa_iso_rmdup_mq30_rg_multirealigned_autosomic_stats/genome_results.txt | awk -F"= |X" '{printf ("%s\n",$2)}')
+FILTER=$(echo $AVG + 3*$SD | bc)
+grep -v '#' CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.vcf | cut -f-2,13 | awk -v filter="$FILTER" -F"\t|:" '{if ($5 >= filter) printf ("%s\t%s\t%s\n", $1,$2-1,$2)}' >> CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.DP_EM_filter_raw.bed
+##DP Gen 30:
+AVG=$(grep "mean coverageData" /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/qualitycontrol/BT30_new_gen30_bwa_iso_rmdup_mq30_rg_multirealigned_autosomic_stats/genome_results.txt | awk -F"= |X" '{printf ("%s\n",$2)}')
+SD=$(grep "std coverageData" /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/qualitycontrol/BT30_new_gen30_bwa_iso_rmdup_mq30_rg_multirealigned_autosomic_stats/genome_results.txt | awk -F"= |X" '{printf ("%s\n",$2)}')
+FILTER=$(echo $AVG + 3*$SD | bc)
+grep -v '#' CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.vcf | cut -f-2,14 | awk -v filter="$FILTER" -F"\t|:" '{if ($5 >= filter) printf ("%s\t%s\t%s\n", $1,$2-1,$2)}' >> CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.DP_EM_filter_raw.bed
+##EMfail:
+grep -v '#' CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.vcf | grep "EMfail" | awk -F"\t" '{printf ("%s\t%s\t%s\n", $1,$2-1,$2)}' >> CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.DP_EM_filter_raw.bed
+
+#Sort sites and remove duplicates:
+sort -k1,1 -k2,2n CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.DP_EM_filter_raw.bed | uniq > CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.DP_EM_filter_sorted.bed
+
+#Filter the VCF:
+module load gcc/7.2.0
+module add gcc/7.2.0
+bedtools subtract -a CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.vcf -b CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.DP_EM_filter_sorted.bed -header > CRISP_autosomic/masked/crisp_multi_all_masked.recode_snps.DP_EM_filtered.vcf
+
+
+THEN SEE DP_EM_filtered in counts (the genome_results.txt files look to be valid), then check if est-sfs needs to be rerun
+
+#Fill the VCF with the ancestral alleles:
+/share/rdata/ramon.pouso/Scripts/fill-aa.sh crisp_all_pools_gen0-140.recode_snps.gen0-140_all_sites.orthologs.confident.vcf
 
 #Polarize the VCF:
 FILE=crisp_all_pools_gen0-140.recode_snps.gen0-140_Pb_0_variable_set.orthologs.confident.aafilled.vcf
@@ -752,6 +888,7 @@ grep -v '^#' crisp_all_pools_gen0-140.recode_snps.Pb_0_variable_set.orthologs.co
 ```
 
 ####Filter separate VCFs:
+#####Pools:
 ```{bash}
 
 module load gcc/7.2.0 
@@ -761,6 +898,19 @@ module add gcc/7.2.0
 bedtools intersect -a /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.polarized.annovar.dm6_multianno.vcf -b /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/sites_in_VCF0-140_variable_in_Pb_gen0.bed -header > /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/crisp_multi_all_masked.recode_snps.gen0-140_Pb_0_variable_set.orthologs.confident.polarized.annovar.dm6_multianno.vcf
 #Pools, gen140:
 bedtools intersect -a /share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/masked/crisp_multi_all_masked.recode_snps.final_snp_set.orthologs.confident.polarized.annovar.dm6_multianno.vcf -b /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/sites_in_VCF0-140_variable_in_Pb_gen0.bed -header > /share/rdata/ramon.pouso/POOLS/gen140/gen140/6variants/masked/crisp_multi_all_masked.recode_snps.gen0-140_Pb_0_variable_set.orthologs.confident.polarized.annovar.dm6_multianno.vcf
+
+```
+
+#####Individuals:
+```{bash}
+
+module load gcc/7.2.0 
+module add gcc/7.2.0
+
+#Individuals, autosomes:
+bedtools intersect -a /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.annovar.dm6_multianno.filtered.vcf -b /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/sites_in_VCF0-140_variable_in_Pb_gen0.bed -header > /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.gen0-140_Pb_0_variable_set.polarized.annovar.dm6_multianno.filtered.vcf
+#Individuals, Xchr:
+bedtools intersect -a /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.final_snp_set.polarized.annovar.dm6_multianno.filtered.vcf -b /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/sites_in_VCF0-140_variable_in_Pb_gen0.bed -header > /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.gen0-140_Pb_0_variable_set.polarized.annovar.dm6_multianno.filtered.vcf
 
 ```
 
@@ -938,6 +1088,61 @@ for pool in "${POOL_LIST[@]}"
   echo $pool
   awk '($9+$10) >= 10' ${pool} > ${pool/.nv.txt/_d10.nv.txt}
   done
+
+```
+
+####Split individuals:
+#####split_individuals.sh
+```{R, engine='bash'}
+
+#Save it as /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/Scripts/split_individuals.sh and run it following the instructions in the subsequent chunk.
+
+cd /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/
+
+module load java/jre/1.8.0_73
+module load GATK/4.1.4
+module load bcftools/1.9
+
+VCF=$1
+if [ $VCF == "/share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.gen0-140_Pb_0_variable_set.polarized.annovar.dm6_multianno.filtered.vcf" ]
+  then
+  SUBSET="autosomes"
+elif [ $VCF == "/share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.gen0-140_Pb_0_variable_set.polarized.annovar.dm6_multianno.filtered.vcf" ]
+  then
+  SUBSET="Xchr"
+fi
+echo $SUBSET
+
+mkdir -p /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/individuals_counts/$SUBSET/
+POPULATIONS=$(bcftools query -l "${VCF}" | rev | cut -d'-' -f2- | rev | sort | uniq)
+POP=$(echo "$POPULATIONS" | sed -n ${SGE_TASK_ID}p)
+INDIVIDUALS=$(bcftools query -l "${VCF}" | awk -v pop="$POP" '$1 ~ pop {print}' | sort -V | uniq)
+for i in ${INDIVIDUALS[@]}
+  do
+  echo "${i}"
+  ID=$(echo "${i}")
+  java -XX:MaxMetaspaceSize=1g -XX:+UseG1GC -XX:+UseStringDeduplication -Xmx4g -jar /share/apps/GATK/4.1.4/gatk-package-4.1.4.0-local.jar SelectVariants \
+  -R /share/rdata/ramon.pouso/reference/indexed_reference/ancestral_dmel-all-chromosome-r6.14.fa \
+  -V "${VCF}" \
+  -O individuals_counts/$SUBSET/"${i}"_gen140_gen0-140_individual_"${SUBSET}".vcf \
+  --exclude-non-variants \
+  -sn $ID
+  done
+
+```
+
+#####Send the array job:
+```{R, engine='bash'}
+
+mkdir -p /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/individuals_counts/
+cd /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/
+
+module load bcftools/1.9
+VCF=/share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.gen0-140_Pb_0_variable_set.polarized.annovar.dm6_multianno.filtered.vcf
+#/share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Alllines-Allcomb_hap_genotyped_snps_masked_hf_pass.gen0-140_Pb_0_variable_set.polarized.annovar.dm6_multianno.filtered.vcf #/share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.gen0-140_Pb_0_variable_set.polarized.annovar.dm6_multianno.filtered.vcf
+ 
+N_POPS=$(bcftools query -l "${VCF}" | rev | cut -d'-' -f2- | rev | sort | uniq | wc -l)
+qsub -cwd -l h=compute-0-9 -t 1-$N_POPS /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/Scripts/split_individuals.sh $VCF
 
 ```
 
@@ -2130,6 +2335,44 @@ scp ramon.pouso@rua2.uvigo.es://share/rdata/ramon.pouso/counts/sites_in_0-140_VC
 
 ```
 
+###Individuals:
+```{R, engine='bash'}
+
+#This code doesn't work as a .sh in the cluster because bedtools isn't properly loaded when using the queue system.
+
+SUBSET="autosomes" #autosomes #Xchr
+
+module load gcc/7.2.0
+module add gcc/7.2.0
+cd /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/individuals_counts/$SUBSET/
+rm counts_individual_${SUBSET}_summary.txt
+echo -e "sample\tgeneration\tfourfold_V\tfourfold_D\ttolerated_V\ttolerated_D\tdeleterious_V\tdeleterious_D\tLoF_V\tLoF_D" > counts_individual_${SUBSET}_summary.txt
+INDLIST=($(ls `find . -name '*_gen140_gen0-140_individual_'${SUBSET}'.vcf' -print`))
+for i in "${INDLIST[@]}"
+  do
+  #echo "${i}"
+  SAMPLE=$(echo "${i}" | cut -d'/' -f2 | cut -d'_' -f1)
+  echo $SAMPLE
+  bedtools intersect -a ${i} -b /share/rdata/ramon.pouso/counts/synonymous_variants_4fold.bed > ${SAMPLE}_140_${SUBSET}_synonymous_4fold.txt
+  FOURFOLD_V=$(wc -l < ${SAMPLE}_140_${SUBSET}_synonymous_4fold.txt)
+  FOURFOLD_D=$(cut -f8 ${SAMPLE}_140_${SUBSET}_synonymous_4fold.txt | awk -F";AC=|;AF=" '{printf ("%s\n"),$2}' | paste -sd+ | bc)
+  bedtools intersect -a ${i} -b /share/rdata/ramon.pouso/counts/missense_variants_provean_SIFT_tolerated.bed > ${SAMPLE}_140_${SUBSET}_missense_tolerated.txt
+  MISTOL_V=$(wc -l < ${SAMPLE}_140_${SUBSET}_missense_tolerated.txt)
+  MISTOL_D=$(cut -f8 ${SAMPLE}_140_${SUBSET}_missense_tolerated.txt | awk -F";AC=|;AF=" '{printf ("%s\n"),$2}' | paste -sd+ | bc)
+  bedtools intersect -a ${i} -b /share/rdata/ramon.pouso/counts/missense_variants_provean_SIFT_deleterious.bed > ${SAMPLE}_140_${SUBSET}_missense_deleterious.txt
+  MISDEL_V=$(wc -l < ${SAMPLE}_140_${SUBSET}_missense_deleterious.txt)
+  MISDEL_D=$(cut -f8 ${SAMPLE}_140_${SUBSET}_missense_deleterious.txt | awk -F";AC=|;AF=" '{printf ("%s\n"),$2}' | paste -sd+ | bc)
+  LOF_V=$(grep -E ';ExonicFunc.refGene=stopgain;|;ExonicFunc.refGene=stoploss;' ${i} | wc -l)
+  if [ "$LOF_V" -eq 0 ]; then LOF_D=0; else LOF_D=$(grep -E ';ExonicFunc.refGene=stopgain;|;ExonicFunc.refGene=stoploss;' ${i} | cut -f8 | awk -F";AC=|;AF=" '{printf ("%s\n"),$2}' | paste -sd+ | bc); fi
+  echo -e "$SAMPLE\t140\t$FOURFOLD_V\t$FOURFOLD_D\t$MISTOL_V\t$MISTOL_D\t$MISDEL_V\t$MISDEL_D\t$LOF_V\t$LOF_D" >> counts_individual_${SUBSET}_summary.txt
+  done
+
+
+scp ramon.pouso@rua2.uvigo.es://share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/individuals_counts/autosomes/counts_individual_autosomes_summary.txt /Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/gen0-140/
+scp ramon.pouso@rua2.uvigo.es://share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/individuals_counts/Xchr/counts_individual_autosomes_summary.txt /Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/gen0-140/
+
+```
+
 #3. Plot counts.
 ##Derived count ratios:
 ###No category relativisation:
@@ -3137,6 +3380,96 @@ ggsave(paste0("lines_relativised_pool_counts_copies_4FR_",type,"_Humberto_versio
 
 ```
 
+#####Individuals: MODIFY USING POOLS 0-140 BELOW
+```{r Plot variant count results}
+
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+type <- "autosomes" #autosomes #Xchr
+
+wd_path <- ("/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/gen0-140/")
+individual_counts <- read_tsv(paste0(wd_path,"counts_individual_",type,"_summary.txt"))
+individual_counts <- mutate(individual_counts, population=gsub("-","",substr(sample,1,3)), individual=gsub("-","",substr(sample,nchar(sample)-1,nchar(sample))))
+individual_counts$population = factor(individual_counts$population)
+individual_counts$individual = as.numeric(individual_counts$individual)
+
+individual_counts$generation <- as.numeric(individual_counts$generation)
+individual_counts <- individual_counts %>% arrange(generation)
+individual_counts$generation = factor(individual_counts$generation)
+individual_counts <- individual_counts %>% arrange(population,generation)
+
+individual_counts_copies_4FR <- individual_counts %>% mutate(fourfold=fourfold_D/fourfold_D,tolerated=tolerated_D/fourfold_D,deleterious=deleterious_D/fourfold_D,LoF=LoF_D/fourfold_D) %>% select(!contains(c("_V","_D","sample"))) %>% gather(ratio,value,-generation,-population,-individual,factor_key=T)
+individual_counts_copies_4FR
+
+!!! RELATIVIZAR POR Pb-0 de los pools?
+
+#Obtain per population averages and standard errors:
+se <- function(x) sqrt(var(x)/length(x)) #first define the standard error function
+
+average_individual_counts_copies_4FR <- data_frame("population"=character(0),"ratio"=character(0),"avg_value"=character(0),"se_value"=character(0)) #next, create the empty dataframe
+
+for (pop in unique(individual_counts_copies_4FR$population)) { #then loop over each population and feature to get the mean and standard error, and feed the dataframe
+  print(pop)
+  #species <- filter(relativised_individual_counts_copies_synR,ratio==r & population==pop) %>% select(species) %>% unlist(.,use.names=F) %>% unique()
+  for (r in unique(individual_counts_copies_4FR$ratio)) {
+    print(r)
+    pop_mean <- filter(individual_counts_copies_4FR,ratio==r & population==pop) %>% select(value) %>% unlist(.,use.names=F) %>% mean()
+    #print(paste0(pop," feature ",r," average is ",pop_mean))
+    pop_se <- filter(individual_counts_copies_4FR,ratio==r & population==pop) %>% select(value) %>% unlist(.,use.names=F) %>% se()
+    #print(paste0(pop," feature ",r," std error is ",pop_se))
+    row_data <- cbind(pop,r,pop_mean,pop_se)
+    colnames(row_data) <- c("population","ratio","avg_value","se_value")
+    average_individual_counts_copies_4FR <- rbind(average_individual_counts_copies_4FR,row_data,stringsAsFactors=F)
+  }
+}
+average_individual_counts_copies_4FR$population = factor(average_individual_counts_copies_4FR$population,levels=c("Pb","L01","L16","L27","L29","L31","L33","L34","L36","L38","L39","L42","L45","L48","L51","L52","L54","L59","L61","L63"))
+average_individual_counts_copies_4FR$ratio = factor(average_individual_counts_copies_4FR$ratio,levels=c("fourfold","tolerated","deleterious","LoF"))
+#average_individual_counts_copies_4FR$generation = as.factor(average_individual_counts_copies_4FR$generation)
+average_individual_counts_copies_4FR$avg_value = as.numeric(average_individual_counts_copies_4FR$avg_value)
+average_individual_counts_copies_4FR$se_value = as.numeric(average_individual_counts_copies_4FR$se_value)
+
+#Plot these means and standard errors:
+Pb_lines_average_individual_counts_copies_4FR_ggplot <- ggplot(data=filter(average_individual_counts_copies_4FR,ratio!="fourfold"), aes(population,avg_value,colour=population)) +
+  #facet_wrap(feature ~ species,nrow=6,ncol=2,scales="free") +
+  facet_wrap(. ~ ratio, scales = "free") +
+  geom_point(aes(colour=population),size=2,position=position_dodge(0.8)) +
+  geom_errorbar(aes(ymin=avg_value-se_value, ymax=avg_value+se_value), position=position_dodge(), width=0.5) +
+  ylab("Derived count relative to 4FR") +
+  #scale_y_continuous(breaks = seq(0.6, 1.0, by = 0.1)) +
+  #ylim(0.6,1.1) +
+  ggtitle(paste0("Individuals ",type)) +
+  guides(colour="none") +
+  theme_bw() +
+  theme(text=element_text(size=12,face="bold"),
+        rect=element_rect(size=1),
+        axis.line=element_line(colour="black"),
+        axis.title=element_text(size=16),
+        axis.text=element_text(size=10,colour="black"),
+        axis.text.x=element_text(colour="black",size=10,angle=90,hjust=1,vjust=0.5),
+        #axis.text.y=element_text(size=24,colour="black",margin=margin(t=0.5,unit="cm")),
+        #axis.title.y=element_text(size=30,margin=margin(r=0.5,unit="cm")),
+        panel.background=element_blank(),
+        panel.border=element_rect(colour="black"),
+        #panel.grid=element_blank(),
+        #panel.grid.major=element_line(colour="grey", linetype="dashed", size=0.4),
+        plot.margin=unit(c(0.5,0.5,0.5,0.5),"cm"),
+        #plot.title=element_text(size=36, face="bold", margin=margin(b=0.5, unit="cm")),
+        legend.background=element_rect(linetype="solid", colour="black", size=.5),
+        #legend.justification=c(0,0),
+        legend.key=element_rect(colour="white"),
+        #legend.key.size=unit(1.3,"cm"),
+        #legend.position="none",
+        legend.title=element_blank()
+  )
+Pb_lines_average_individual_counts_copies_4FR_ggplot
+ggsave(paste0("Pb_lines_pop_average_raw_individual_counts_copies_4FR_",type,".pdf"), width=15, height=12, units="cm", device="pdf", path=wd_path)
+
+```
+
+
 #####Gen0-140 pools Pb and line averages (Humberto version):
 ```{r Plot variant count results}
 
@@ -3350,7 +3683,7 @@ average_relativised_pool_counts_copies_4FR
 #write_tsv(average_relativised_pool_counts_copies_4FR,paste0(wd_path,"/pop_average_relativised_pool_counts_copies_4FR_",type,".txt"))
 
 
-#Combined version (Pb):
+#Combined version:
 Pb_lines_relativised_pool_counts_copies_4FR_ggplot <- ggplot(data=filter(average_relativised_pool_counts_copies_4FR,ratio!="fourfold", generation!=5), aes(generation,avg_Pb_relative_value)) +
   #facet_wrap(feature ~ species,nrow=6,ncol=2,scales="free") +
   facet_grid(. ~ ratio) +
