@@ -894,16 +894,14 @@ cat <(grep '#' $FILE) ${FILE/.vcf/.consistent.vcf} ${FILE/.vcf/.inconsistent.pol
 
 ```
 
-#6!!!. Carry out general annotation with ANNOVAR:
+#6. Carry out general annotation with ANNOVAR:
 ##Build the drosophila database.
 ###Good complete version (changes codes in the UCSC database).
 ```{R, engine='bash'}
 
-#First, copy the original version of the database (and rename it as "old_annovar_database") so that any new changes do not overwrite the original version.
-cd /share/rdata/ramon.pouso/reference/indexed_reference
-scp -pr annovar_database old_annovar_database
-
-cd annovar_database/ancestral_dm6/
+cd /share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/
+mkdir two_parsimony_ancestral_dm6
+cd two_parsimony_ancestral_dm6
 
 #Note: any code involving annotate_variation.pl won't work because apparently the server blocks its attempts to download files from an external website, so I had to replace it with alternative code.
 
@@ -929,7 +927,7 @@ cd annovar_database/ancestral_dm6/
 
 #The following has to be repeated, since the new polarisation means that the ancestral genome has changed:
 #Copy the ancestral fasta (obtained in the polarisation.Rmd script) to the aproppriate folder:
-scp -p /share/rdata/ramon.pouso/reference/indexed_reference/ancestral_dmel-all-chromosome-r6.14.fa dm6_seq/dm6_ancestral_dmel-all-chromosome-r6.14.fa
+scp -p /share/rdata/ramon.pouso/reference/indexed_reference/two_parsimony_ancestral-all-chromosome-r6.14.fa dm6_seq/dm6_ancestral_dmel-all-chromosome-r6.14.fa
 
 #Next, use annovar to build the gene database:
 module load annovar/4.19
@@ -954,8 +952,8 @@ retrieve_seq_from_fasta.pl dm6_refGene.txt -seqfile dm6_seq/dm6_ancestral_dmel-a
 
 #Next, clone the previous ancestral database and rename it and some of its files to include the code "nr" (non-redundant):
 cd /share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/
-#scp -pr ancestral_dm6 nr_ancestral_dm6
-cd nr_ancestral_dm6
+#scp -pr two_parsimony_ancestral_dm6 nr_two_parsimony_ancestral_dm6
+cd nr_two_parsimony_ancestral_dm6
 mv dm6_seq dm6nr_seq
 mv dm6nr_seq/dm6_ancestral_dmel-all-chromosome-r6.14.fa dm6nr_seq/dm6nr_ancestral_dmel-all-chromosome-r6.14.fa
 mv dm6.chromAlias.txt dm6nr.chromAlias.txt
@@ -980,14 +978,14 @@ module load gcc/7.2.0
 module add gcc/7.2.0 
 
 
-cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/
-FILE=crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.polarized.vcf
-
+cd /share/rdata2/dani_k/consanguinidad_rapida/variants/
+FILE=crisp_all_pools_gen0-6.all_sites.orthologs.confident.bcf_filtered.masked.DP_EM_filtered.polarisable.polarized.vcf
+FILE=kaka.vcf
 #First convert from VCF to table (annovar can't deal with the particular format of the pool. VCFs).
 convert2annovar.pl -format vcf4old --outfile ${FILE/.vcf/.annovar} $FILE
 
 #Next, annotate the table. The resulting file is automatically labelled as .vcf by the programme, even though it really isn't a VCF.
-table_annovar.pl ${FILE/.vcf/.annovar} /share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/nr_ancestral_dm6 -vcfinput --outfile ${FILE/.vcf/.nr_annovar} -buildver dm6nr --protocol refGene --operation g
+table_annovar.pl ${FILE/.vcf/.annovar} /share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/nr_two_parsimony_ancestral_dm6 -vcfinput --outfile ${FILE/.vcf/.nr_annovar} -buildver dm6nr --protocol refGene --operation g
 
 #Convert the annotated table to a .bed.
 mv ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.vcf ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.tab
@@ -1036,7 +1034,7 @@ bedtools intersect -a $FILE -b ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.bed -wb 
 <!-- make -->
 
 <!-- #Next download the UniProt ref90 protein database: -->
-<!-- cd /mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/sift_prot_db -->
+<!-- cd /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/sift4g_annotation/sift_prot_db -->
 <!-- wget https://ftp.uniprot.org/pub/databases/uniprot/uniref/uniref90/uniref90.fasta.gz -->
 <!-- gunzip uniref90.fasta.gz -->
 
@@ -1044,48 +1042,41 @@ bedtools intersect -a $FILE -b ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.bed -wb 
 <!-- git clone https://github.com/pauline-ng/SIFT4G_Create_Genomic_DB.git scripts_to_build_SIFT_db -->
 <!-- cd scripts_to_build_SIFT_db/test_files/ -->
 
-<!-- #Edit the target species config file: -->
-<!-- scp homo_sapiens-test.txt nr_ancestral_dm6.config.txt -->
-<!-- nano nr_ancestral_dm6.config.txt #edit each of the following fields following instructions from https://github.com/pauline-ng/SIFT4G_Create_Genomic_DB#configFile: -->
-<!-- PARENT_DIR=/mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/scripts_to_build_SIFT_db/test_files/nr_ancestral_dm6 -->
-<!-- ORG=ancestral_drosophila_melanogaster -->
-<!-- ORG_VERSION=nr_ancestral_dm6 -->
-<!-- SIFT4G_PATH=/mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/sift4g/bin/sift4g -->
-<!-- PROTEIN_DB=/mnt/lustre/scratch/home/uvi/bg/dkr/sift4g_annotation/sift_prot_db/uniref90.fasta -->
-<!-- MITO_GENETIC_CODE_TABLE=5 -->
-<!-- MITO_GENETIC_CODE_TABLENAME=Invertebrate Mitochondrial -->
-
 <!-- #Create directory for the target species, and copy the target species files (reference fasta and annotation file): -->
 <!-- mkdir -p nr_ancestral_dm6 -->
 <!-- cd nr_ancestral_dm6 -->
 <!-- #Put genomic fasta file in chr-src, and split it by chromosome: -->
 <!-- mkdir -p chr-src -->
 
-#First copy the old database and rename it as "old_nr_ancestral_dm6" so that new changes don't overwrite the original content (very slow!!!):
-cd $LUSTRE/sift4g_annotation/scripts_to_build_SIFT_db/test_files
-scp -pr nr_ancestral_dm6 old_nr_ancestral_dm6
+#First copy the previous database and rename it as "two_parsimony_nr_ancestral_dm6":
+cd $LUSTRE/sift4g_annotation/scripts_to_build_SIFT_db/test_files #eventually I moved the entire sift4g folder from $LUSTRE to $STORE
+scp -pr nr_ancestral_dm6 two_parsimony_nr_ancestral_dm6
+scp -p nr_ancestral_dm6.config.txt two_parsimony_nr_ancestral_dm6.config.txt
 
-#Next, edit all paths within the config file (since everything is now in CESGA FT3 rather than FT2, the path is a bit different and "nlsas/" needs to be added after "scratch/")
-nano nr_ancestral_dm6.config.txt #edit
+#Next, edit all paths within the config file (since everything is now in CESGA FT3 rather than FT2, the path is a bit different and "nlsas/" needs to be added after "scratch/"):
+nano two_parsimony_nr_ancestral_dm6.config.txt #edit the following lines:
+PARENT_DIR=/mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/sift4g_annotation/scripts_to_build_SIFT_db/test_files/two_parsimony_nr_ancestral_dm6
+ORG=ancestral_drosophila_melanogaster
+ORG_VERSION=two_parsimony_nr_ancestral_dm6
 
 #Copy the new genomic fasta file to chr-src, and split it by chromosome:
-cd nr_ancestral_dm6
-scp -p ramon.pouso@rua2.uvigo.es://share/rdata/ramon.pouso/reference/indexed_reference/ancestral_dmel-all-chromosome-r6.14.fa.gz chr-src/
+cd two_parsimony_nr_ancestral_dm6
+scp -p ramon.pouso@rua2.uvigo.es://share/rdata/ramon.pouso/reference/indexed_reference/two_parsimony_ancestral-all-chromosome-r6.14.fa.gz chr-src/
 cd chr-src/
-gunzip ancestral_dmel-all-chromosome-r6.14.fa.gz
-awk 'BEGIN {O="";} /^>/ { O=sprintf("%s.fa",substr($0,2));} {if(O!="") print >> O;}' ancestral_dmel-all-chromosome-r6.14.fa
-rm ancestral_dmel-all-chromosome-r6.14.fa
+gunzip two_parsimony_ancestral-all-chromosome-r6.14.fa.gz
+awk 'BEGIN {O="";} /^>/ { O=sprintf("%s.fa",substr($0,2));} {if(O!="") print >> O;}' two_parsimony_ancestral-all-chromosome-r6.14.fa
+rm two_parsimony_ancestral-all-chromosome-r6.14.fa
 rm *.gz #delete the old files
 #Put gene annotation file in gene-annotation-src:
 cd ..
 mkdir -p gene-annotation-src
-scp -p ramon.pouso@rua2.uvigo.es://share/rdata/ramon.pouso/reference/indexed_reference/dm6nr.refGene.gtf gene-annotation-src/
+scp -p ramon.pouso@rua2.uvigo.es://share/rdata/ramon.pouso/reference/indexed_reference/dm6nr.refGene.gtf.gz gene-annotation-src/
 gunzip gene-annotation-src/dm6nr.refGene.gtf.gz
 awk -F"\t" '{OFS = FS} { gsub(/chr/,"", $1); print }' gene-annotation-src/dm6nr.refGene.gtf | gzip > gene-annotation-src/dm6nr.refGene.gtf.gz #remove the "chr" part from the chromosome names in the .gtf file, since it's using a different nomenclature than the .fa file and it was crashing the programme.
 rm gene-annotation-src/dm6nr.refGene.gtf
 
 #Next remove the files and folders which will be redone:
-cd /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/sift4g_annotation/scripts_to_build_SIFT_db/test_files/nr_ancestral_dm6
+cd /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/sift4g_annotation/scripts_to_build_SIFT_db/test_files/two_parsimony_nr_ancestral_dm6
 rm -r SIFT_predictions
 rm -r singleRecords*
 rm -r nr_ancestral_dm6
@@ -1114,7 +1105,7 @@ sbatch make-SIFT-db-all.sh #But first store in make-SIFT-db-all.sh the following
 #SBATCH --mail-type=TIME_LIMIT_80
 #SBATCH --mail-user=dkmanruiz@gmail.com
 cd /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/sift4g_annotation/scripts_to_build_SIFT_db
-perl make-SIFT-db-all.pl -config /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/sift4g_annotation/scripts_to_build_SIFT_db/test_files/nr_ancestral_dm6.config.txt
+perl make-SIFT-db-all.pl -config /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/sift4g_annotation/scripts_to_build_SIFT_db/test_files/two_parsimony_nr_ancestral_dm6.config.txt
 
 #I encountered this bug: https://github.com/rvaser/sift4g/issues/10 and edited the code as suggested here. However I kept running into the same problem until I realised that the programme doesn't remove the all_prot.fasta file, so it keeps appending the wrong sequences. Notwithstanding, even after manually removing it, I kept running into the alignment issues. So I posted a message in the linked issue, and followed rvaser's instructions over there.
 
@@ -1131,7 +1122,7 @@ sbatch make-SIFT-db-starting_from_SIFT4G.sh #But first store in make-SIFT-db-sta
 #SBATCH --mail-type=TIME_LIMIT_80
 #SBATCH --mail-user=dkmanruiz@gmail.com
 cd /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/sift4g_annotation/scripts_to_build_SIFT_db/
-perl make-SIFT-db-starting_from_SIFT4G.pl.txt -config /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/sift4g_annotation/scripts_to_build_SIFT_db/test_files/nr_ancestral_dm6.config.txt
+perl make-SIFT-db-starting_from_SIFT4G.pl.txt -config /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/sift4g_annotation/scripts_to_build_SIFT_db/test_files/two_parsimony_nr_ancestral_dm6.config.txt
 
 #Next I kept running into some extra errors while populating the databases, so I posted yet another issue: https://github.com/pauline-ng/SIFT4G_Create_Genomic_DB/issues/53 . According to Pauline, these error messages matter not.
 
@@ -1142,15 +1133,14 @@ perl make-SIFT-db-starting_from_SIFT4G.pl.txt -config /mnt/lustre/scratch/nlsas/
 #####Upload the VCFs and the SIFT4G jar file to CESGA:
 ```{R, engine='bash'}
 
-cd /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/sift4g_annotation
-mv annotation/ old_annotation/
+/mnt/netapp2/Store_uni/home/uvi/bg/dkr/sift4g_annotation
 
 #In CESGA, create the destination folders:
-mkdir -p /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/sift4g_annotation/annotation/pools_gen0-140/
+mkdir -p /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/sift4g_annotation/annotation/two_parsimony_pools_gen0-140/
 
 #From the cluster, copy the following files:
 ##ANNOVAR-annotated VCF:
-scp -p /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.polarized.nr_annovar.dm6nr_multianno.vcf uvibgdkr@ft3.cesga.es://mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/sift4g_annotation/annotation/pools_gen0-140/
+scp -p /share/rdata2/dani_k/consanguinidad_rapida/variants/crisp_all_pools_gen0-6.all_sites.orthologs.confident.bcf_filtered.masked.DP_EM_filtered.polarisable.polarized.nr_annovar.dm6nr_multianno.vcf uvibgdkr@ft3.cesga.es://mnt/netapp2/Store_uni/home/uvi/bg/dkr/sift4g_annotation/annotation/two_parsimony_pools_gen0-140/
 ##SIFT4G jar file:
 #scp -p /share/rdata/ramon.pouso/sift4g/SIFT4G_Annotator_v2.4.jar uvibgdkr@ft3.cesga.es://mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/sift4g_annotation/sift4g/
 
@@ -1160,8 +1150,8 @@ scp -p /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/crisp_all_pools_ge
 ```{R, engine='bash'}
 
 #Launch it as follows for each VCF (don't copy them from here to the terminal; invisible spaces will break it):
-cd /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/sift4g_annotation/annotation/pools_gen0-140
-java -jar /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/sift4g_annotation/sift4g/SIFT4G_Annotator_v2.4.jar -c -t -i crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.polarized.nr_annovar.dm6nr_multianno.vcf -d /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/sift4g_annotation/scripts_to_build_SIFT_db/test_files/nr_ancestral_dm6/nr_ancestral_dm6/ -r ./
+cd /mnt/netapp2/Store_uni/home/uvi/bg/dkr/sift4g_annotation/annotation/two_parsimony_pools_gen0-140/
+java -jar/mnt/netapp2/Store_uni/home/uvi/bg/dkr/sift4g_annotation/sift4g/SIFT4G_Annotator_v2.4.jar -c -t -i crisp_all_pools_gen0-6.all_sites.orthologs.confident.bcf_filtered.masked.DP_EM_filtered.polarisable.polarized.nr_annovar.dm6nr_multianno.vcf -d /mnt/netapp2/Store_uni/home/uvi/bg/dkr/sift4g_annotation/scripts_to_build_SIFT_db/test_files/two_parsimony_nr_ancestral_dm6/two_parsimony_nr_ancestral_dm6/ -r ./
 
 #If this doesn't work from the standard interactive shell in CESGA, then request dedicated interactive nodes, and run the former core from there. E.g.: compute -c 2 --mem 20
 
@@ -1171,7 +1161,7 @@ java -jar /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/sift4g_annotation/sift4g/SIF
 ```{R, engine='bash'}
 
 #From the cluster, copy the following files:
-scp -p uvibgdkr@ft3.cesga.es://mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/sift4g_annotation/annotation/pools_gen0-140/crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.polarized.nr_annovar.dm6nr_multianno_SIFTpredictions.vcf /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/
+scp -p uvibgdkr@ft3.cesga.es://mnt/netapp2/Store_uni/home/uvi/bg/dkr/sift4g_annotation/annotation/two_parsimony_pools_gen0-140/pools_gen0-140/crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.polarized.nr_annovar.dm6nr_multianno_SIFTpredictions.vcf /share/rdata2/dani_k/consanguinidad_rapida/variants/
 
 ```
 
@@ -1181,8 +1171,8 @@ scp -p uvibgdkr@ft3.cesga.es://mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/sift4g_a
 
 #It's important to select the relevant annotation per site when there is more than one. Extract the name of the gene from the annovar part, then also from the sift part, and keep only the matching one!
 
-cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/
-VCF=crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.polarized.nr_annovar.dm6nr_multianno_SIFTpredictions.vcf
+cd /share/rdata2/dani_k/consanguinidad_rapida/variants/
+VCF=crisp_all_pools_gen0-6.all_sites.orthologs.confident.bcf_filtered.masked.DP_EM_filtered.polarisable.polarized.nr_annovar.dm6nr_multianno_SIFTpredictions.vcf
 
 #One entry: 
 grep -v '^#' $VCF | grep 'nonsynonymous_SNV' | grep 'SIFT' | awk '!($5 ~ ",")' | awk -F";Gene\\\\.refGene=|;GeneDetail\\\\.refGene=|;AAChange\\\\.refGene=|;ALLELE_END|;SIFTINFO=|\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$9,$11,$13)}' | awk 'BEGIN{FS=OFS="\t"} {gsub(":","_", $4);gsub("\\(","_");gsub("\\)","_");print}' | awk -F"\t|:" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$10)}' | grep -v "," > ${VCF/.vcf/.clean.txt}
@@ -1192,69 +1182,11 @@ grep -v '^#' $VCF | grep 'nonsynonymous_SNV' | grep 'SIFT' | awk '!($5 ~ ",")' |
 #Classify the mutations in deleterious and tolerated categories:
 module load gcc/7.2.0
 module add gcc/7.2.0
-grep "DELETERIOUS" ${VCF/.vcf/.clean.txt} | bedtools sort > gen0-140_all_sites_missense_variants_SIFT_scores_deleterious.bed #15595 (23.5% of the total 66486)
-grep "TOLERATED" ${VCF/.vcf/.clean.txt} | bedtools sort > gen0-140_all_sites_missense_variants_SIFT_scores_tolerated.bed #50774 (76.4% of the total 66486)
+grep "DELETERIOUS" ${VCF/.vcf/.clean.txt} | bedtools sort > gen0-6_all_sites_missense_variants_SIFT_scores_deleterious.bed #14710 (25.8% of the total 57069)
+grep "TOLERATED" ${VCF/.vcf/.clean.txt} | bedtools sort > gen0-6_all_sites_missense_variants_SIFT_scores_tolerated.bed #42301 (74.1% of the total 57069)
 
 #Check genes with parentheses:
 #grep -v '^#' $VCF | grep 'synonymous_SNV' | grep 'SIFT' | awk -F";Gene\\\\.refGene=|;GeneDetail\\\\.refGene=|;AAChange\\\\.refGene=|;ALLELE_END|;SIFTINFO=|\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$9,$11,$13)}' | awk -F"\t" '{gsub(/:/,"_", $4); print}' | awk -F"\t|:" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$10)}' | awk '$5 ~ "\\("' | grep "," | sed 's/,/\t/g' | awk -F"\t" '{gsub("\\(","_");gsub("\\)","_");print}' | awk '{for(i=6;i<=NF;i++){if($i ~ $5){printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$i)}}}' | less -S
-
-#Check consistency between the current and the old VCFs:
-##Both deleterious:
-bedtools intersect -a /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/gen0-140_all_sites_missense_variants_SIFT_scores_deleterious.bed -b /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/POOLS_gen0-40_missense_variants_SIFT_scores_deleterious.bed | wc -l #14061
-#Both tolerated:
-bedtools intersect -a /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/gen0-140_all_sites_missense_variants_SIFT_scores_tolerated.bed -b /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/POOLS_gen0-40_missense_variants_SIFT_scores_tolerated.bed | wc -l #46908
-##Deleterious in new dataset, tolerated in the old one (gen0-40):
-bedtools intersect -a /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/gen0-140_all_sites_missense_variants_SIFT_scores_deleterious.bed -b /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/POOLS_gen0-40_missense_variants_SIFT_scores_tolerated.bed | wc -l #26
-##Tolerated in the old dataset (gen0-40), deleterious in the new one:
-bedtools intersect -a /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/gen0-140_all_sites_missense_variants_SIFT_scores_tolerated.bed -b /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/POOLS_gen0-40_missense_variants_SIFT_scores_deleterious.bed | wc -l #16
-##Deleterious exclusive to the new dataset:
-bedtools subtract -a /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/gen0-140_all_sites_missense_variants_SIFT_scores_deleterious.bed -b /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/POOLS_gen0-40_missense_variants_SIFT_scores_deleterious.bed | wc -l #1534
-##Tolerated exclusive to the new dataset:
-bedtools subtract -a /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/gen0-140_all_sites_missense_variants_SIFT_scores_tolerated.bed -b /share/rdata/ramon.pouso/POOLS/gen0-40/gen0-40/5variants/multirealigned/POOLS_gen0-40_missense_variants_SIFT_scores_tolerated.bed | wc -l #3866
-
-#Looks good.
-
-```
-
-###≤0.01 vs >0.05:
-```{bash}
-
-#It's important to select the relevant annotation per site when there is more than one. Extract the name of the gene from the annovar part, then also from the sift part, and keep only the matching one!
-
-cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/
-VCF=crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.polarized.nr_annovar.dm6nr_multianno_SIFTpredictions.vcf
-
-#One entry: 
-grep -v '^#' $VCF | grep 'nonsynonymous_SNV' | grep 'SIFT' | awk '!($5 ~ ",")' | awk -F";Gene\\\\.refGene=|;GeneDetail\\\\.refGene=|;AAChange\\\\.refGene=|;ALLELE_END|;SIFTINFO=|\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$9,$11,$13)}' | awk 'BEGIN{FS=OFS="\t"} {gsub(":","_", $4);gsub("\\(","_");gsub("\\)","_");print}' | awk -F"\t|:" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$10)}' | grep -v "," > ${VCF/.vcf/.clean.txt}
-#Multiple entries:
-grep -v '^#' $VCF | grep 'nonsynonymous_SNV' | grep 'SIFT' | awk '!($5 ~ ",")' | awk -F";Gene\\\\.refGene=|;GeneDetail\\\\.refGene=|;AAChange\\\\.refGene=|;ALLELE_END|;SIFTINFO=|\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$9,$11,$13)}' | awk 'BEGIN{FS=OFS="\t"} {gsub(":","_", $4);gsub("\\(","_");gsub("\\)","_");print}' | awk -F"\t|:" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$10)}' | grep "," | sed 's/,/\t/g' | awk '{for(i=6;i<=NF;i++){if($i ~ $5){printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$i)}}}' >> ${VCF/.vcf/.clean.txt}
-
-#Classify the mutations in deleterious and tolerated categories:
-module load gcc/7.2.0
-module add gcc/7.2.0
-grep "DELETERIOUS" ${VCF/.vcf/.clean.txt} | awk -F"\t|\\\\|" 'BEGIN{OFS="\t"} {printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$14)}' | awk '$6<=0.01' | bedtools sort > gen0-140_all_sites_missense_variants_SIFT_scores_001deleterious.bed #9890 instead of 15595 with the default threshold
-#grep "TOLERATED" ${VCF/.vcf/.clean.txt} | bedtools sort > gen0-140_all_sites_missense_variants_SIFT_scores_tolerated.bed
-
-```
-
-###≤0.05 vs >0.20:
-```{bash}
-
-#It's important to select the relevant annotation per site when there is more than one. Extract the name of the gene from the annovar part, then also from the sift part, and keep only the matching one!
-
-cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/
-VCF=crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.polarized.nr_annovar.dm6nr_multianno_SIFTpredictions.vcf
-
-#One entry: 
-grep -v '^#' $VCF | grep 'nonsynonymous_SNV' | grep 'SIFT' | awk '!($5 ~ ",")' | awk -F";Gene\\\\.refGene=|;GeneDetail\\\\.refGene=|;AAChange\\\\.refGene=|;ALLELE_END|;SIFTINFO=|\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$9,$11,$13)}' | awk 'BEGIN{FS=OFS="\t"} {gsub(":","_", $4);gsub("\\(","_");gsub("\\)","_");print}' | awk -F"\t|:" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$10)}' | grep -v "," > ${VCF/.vcf/.clean.txt}
-#Multiple entries:
-grep -v '^#' $VCF | grep 'nonsynonymous_SNV' | grep 'SIFT' | awk '!($5 ~ ",")' | awk -F";Gene\\\\.refGene=|;GeneDetail\\\\.refGene=|;AAChange\\\\.refGene=|;ALLELE_END|;SIFTINFO=|\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$9,$11,$13)}' | awk 'BEGIN{FS=OFS="\t"} {gsub(":","_", $4);gsub("\\(","_");gsub("\\)","_");print}' | awk -F"\t|:" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$10)}' | grep "," | sed 's/,/\t/g' | awk '{for(i=6;i<=NF;i++){if($i ~ $5){printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$i)}}}' >> ${VCF/.vcf/.clean.txt}
-
-#Classify the mutations in deleterious and tolerated categories:
-module load gcc/7.2.0
-module add gcc/7.2.0
-#grep "DELETERIOUS" ${VCF/.vcf/.clean.txt} | bedtools sort > gen0-140_all_sites_missense_variants_SIFT_scores_deleterious.bed
-grep "TOLERATED" ${VCF/.vcf/.clean.txt} | awk -F"\t|\\\\|" 'BEGIN{OFS="\t"} {printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$14)}' | awk '$6>=0.20' | bedtools sort > gen0-140_all_sites_missense_variants_SIFT_scores_020tolerated.bed #34901 instead of 50774 with the default threshold 
 
 ```
 
@@ -1264,38 +1196,46 @@ grep "TOLERATED" ${VCF/.vcf/.clean.txt} | awk -F"\t|\\\\|" 'BEGIN{OFS="\t"} {pri
 ```{bash}
 
 #This and the next step will be performed in the cluster, but the rest in CESGA. The idea here is to obtain the list of mutations which have changed (due to a different polarisation) or have been included for the first time in the new dataset:
-mkdir -p /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/provean
-cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/provean
+mkdir -p /share/rdata2/dani_k/consanguinidad_rapida/variants/provean
+cd /share/rdata2/dani_k/consanguinidad_rapida/variants/provean
 module load gcc/7.2.0
 module add gcc/7.2.0
 
-VCF="/share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.polarized.nr_annovar.dm6nr_multianno.vcf"
+VCF="/share/rdata2/dani_k/consanguinidad_rapida/variants/crisp_all_pools_gen0-6.all_sites.orthologs.confident.bcf_filtered.masked.DP_EM_filtered.polarisable.polarized.nr_annovar.dm6nr_multianno.vcf"
 
 #Extract list of sites which are annotated as exonic and nonsynonymous, and convert to bed format:
-grep -e 'refGene=exonic;.*nonsynonymous' $VCF > pools_individuals_nonsynonymous_vcf.txt
-awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$4,$5)}' pools_individuals_nonsynonymous_vcf.txt > pools_individuals_nonsynonymous_vcf.bed
+grep -e 'refGene=exonic;.*nonsynonymous' $VCF > fast_inbreeding_nonsynonymous_vcf.txt
+awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$4,$5)}' fast_inbreeding_nonsynonymous_vcf.txt > fast_inbreeding_nonsynonymous_vcf.bed
 
-#Convert the old dataset to bed format:
-awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$4,$5)}' /share/rdata/ramon.pouso/provean/pools_individuals_nonsynonymous_vcf.txt | sort -k1,1 -k2,2n | uniq > /share/rdata/ramon.pouso/provean/pools_individuals_nonsynonymous_vcf.bed
+/share/rdata/ramon.pouso/provean/pools_individuals_nonsynonymous_vcf.bed #original slow inbreeding dataset
+/share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/provean/pools_individuals_nonsynonymous_vcf.bed #latest slow inbreeding dataset
 
 #Extract list of sites exclusive to the new dataset, plus those whose polarisation changed between datasets:
-bedtools subtract -a pools_individuals_nonsynonymous_vcf.bed -b /share/rdata/ramon.pouso/provean/pools_individuals_nonsynonymous_vcf.bed > pools_individuals_nonsynonymous_vcf.diff.bed
-bedtools intersect -a pools_individuals_nonsynonymous_vcf.bed -b /share/rdata/ramon.pouso/provean/pools_individuals_nonsynonymous_vcf.bed -wa -wb | awk '$4 != $9' | cut -f-5 >> pools_individuals_nonsynonymous_vcf.diff.bed
-sort -k1,1 -k2,2n pools_individuals_nonsynonymous_vcf.diff.bed > pools_individuals_nonsynonymous_vcf.diff_sorted.bed && mv pools_individuals_nonsynonymous_vcf.diff_sorted.bed pools_individuals_nonsynonymous_vcf.diff.bed
+##Sites exclusive to the fast inbreeding dataset:
+bedtools subtract -a fast_inbreeding_nonsynonymous_vcf.bed -b <(cat /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/provean/pools_individuals_nonsynonymous_vcf.bed /share/rdata/ramon.pouso/provean/pools_individuals_nonsynonymous_vcf.bed | cut -f-3 | sort -k1,1 -k2,2n | uniq) > fast_inbreeding_nonsynonymous_vcf.diff.bed #23607
+##Sites whose polarisation changed between one of the two slow inbreeding datasets and the fast inbreeding one, which were not already changed in the other slow inbreeding dataset:
+bedtools subtract -a fast_inbreeding_nonsynonymous_vcf.bed -b fast_inbreeding_nonsynonymous_vcf.diff.bed | bedtools intersect -a stdin -b /share/rdata/ramon.pouso/provean/pools_individuals_nonsynonymous_vcf.bed -wa -wb | awk '$4 != $9' | bedtools intersect -a stdin -b /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/provean/pools_individuals_nonsynonymous_vcf.bed -wa -wb | awk '$4 != $14' | cut -f-5 >> fast_inbreeding_nonsynonymous_vcf.diff.bed #170
+##Sites whose polarisation changed between the latest slow inbreeding dataset and the fast inbreeding one, which were not present in the original slow inbreeding dataset:
+bedtools subtract -a /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/provean/pools_individuals_nonsynonymous_vcf.bed -b /share/rdata/ramon.pouso/provean/pools_individuals_nonsynonymous_vcf.bed | bedtools intersect -a fast_inbreeding_nonsynonymous_vcf.bed -b stdin -wa -wb | awk '$4 != $9' | cut -f-5 >> fast_inbreeding_nonsynonymous_vcf.diff.bed #73
+##Sites whose polarisation changed between the latest slow inbreeding dataset and the fast inbreeding one, which were not present in the original slow inbreeding dataset:
+bedtools subtract -a /share/rdata/ramon.pouso/provean/pools_individuals_nonsynonymous_vcf.bed -b /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/provean/pools_individuals_nonsynonymous_vcf.bed | bedtools intersect -a fast_inbreeding_nonsynonymous_vcf.bed -b stdin -wa -wb | awk '$4 != $9' | cut -f-5 >> fast_inbreeding_nonsynonymous_vcf.diff.bed #1
+
+##Sort them and keep only the unique entries:
+sort -k1,1 -k2,2n fast_inbreeding_nonsynonymous_vcf.diff.bed > fast_inbreeding_nonsynonymous_vcf.diff_sorted.bed && mv fast_inbreeding_nonsynonymous_vcf.diff_sorted.bed fast_inbreeding_nonsynonymous_vcf.diff.bed #23851 entries, which is 72 less than the original file in the cluster (23923 entries). I can't recreate the code to generate that exact file because it had a mistake thanks to which some mutations from the original slow inbreeding project but missing from the latest slow inbreeding project were also included here, even though there was no polarisation change between them. When testing this, I replaced by mistake the original fast_inbreeding_nonsynonymous_vcf.diff.bed file with the new, correct one. The rest of the files such as fast_inbreeding_nonsynonymous_gene_names.txt are still the original, and thus include the extra unnnecessary SNPs. In the end none of this matters much: I simply unnecessarily repeated PROVEAN for those 72 genes.
 
 #Generate list with coordinates, gene and transcript names, and aminoacid changes:
-bedtools intersect -a $VCF -b pools_individuals_nonsynonymous_vcf.diff.bed | awk -F"\t|;AAChange.refGene=|;ALLELE_END" '{printf ("%s\t%s\t%s\n", $1,$2,$9)}' | awk -F"\t|:|," '{printf ("%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$7)}' | awk -F"\t" '{OFS = FS} { gsub(/p\./,"", $5); print }' | grep -v "RNA" | sort -k1,1 -k2,2n | uniq > pools_individuals_nonsynonymous_gene_names.txt
+bedtools intersect -a $VCF -b fast_inbreeding_nonsynonymous_vcf.diff.bed | awk -F"\t|;AAChange.refGene=|;ALLELE_END" '{printf ("%s\t%s\t%s\n", $1,$2,$9)}' | awk -F"\t|:|," '{printf ("%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$7)}' | awk -F"\t" '{OFS = FS} { gsub(/p\./,"", $5); print }' | grep -v "RNA" | sort -k1,1 -k2,2n | uniq > fast_inbreeding_nonsynonymous_gene_names.txt
 
 #Generate the same list for all missense sites in the VCF (and not just the new/changed ones), which will be necessary later on:
-bedtools intersect -a $VCF -b pools_individuals_nonsynonymous_vcf.bed | awk -F"\t|;AAChange.refGene=|;ALLELE_END" '{printf ("%s\t%s\t%s\n", $1,$2,$9)}' | awk -F"\t|:|," '{printf ("%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$7)}' | awk -F"\t" '{OFS = FS} { gsub(/p\./,"", $5); print }' | grep -v "RNA" | sort -k1,1 -k2,2n | uniq > pools_individuals_nonsynonymous_gene_names_complete.txt
+bedtools intersect -a $VCF -b fast_inbreeding_nonsynonymous_vcf.bed | awk -F"\t|;AAChange.refGene=|;ALLELE_END" '{printf ("%s\t%s\t%s\n", $1,$2,$9)}' | awk -F"\t|:|," '{printf ("%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$7)}' | awk -F"\t" '{OFS = FS} { gsub(/p\./,"", $5); print }' | grep -v "RNA" | sort -k1,1 -k2,2n | uniq > fast_inbreeding_nonsynonymous_gene_names_complete.txt
 
 #Sanity checks:
-cut -f3 pools_individuals_nonsynonymous_gene_names.txt | sort -u | wc -l #3232 genes
-cut -f4 pools_individuals_nonsynonymous_gene_names.txt | sort -u | wc -l #3232 transcripts
+cut -f3 fast_inbreeding_nonsynonymous_gene_names.txt | sort -u | wc -l #8160 genes
+cut -f4 fast_inbreeding_nonsynonymous_gene_names.txt | sort -u | wc -l #8160 transcripts
 #If the number of unique gene names and transcript names is the same, the script worked. In a previous version both numbers were different, which allowed me to discover that some genes with parenthesis in their names were introducing bugs. I modified the code to the current version, and now everything checks.
 
-scp pools_individuals_nonsynonymous_gene_names.txt uvibgdkr@ft3.cesga.es://mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/provean_annotation
-scp pools_individuals_nonsynonymous_gene_names_complete.txt uvibgdkr@ft3.cesga.es://mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/provean_annotation
+scp fast_inbreeding_nonsynonymous_gene_names.txt uvibgdkr@ft3.cesga.es://mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/provean_annotation
+scp fast_inbreeding_nonsynonymous_gene_names_complete.txt uvibgdkr@ft3.cesga.es://mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/provean_annotation
 
 ```
 
@@ -1305,10 +1245,10 @@ scp pools_individuals_nonsynonymous_gene_names_complete.txt uvibgdkr@ft3.cesga.e
 cd /share/rdata/ramon.pouso/reference/indexed_reference/
 
 #Upload the non-redundant version of the .gtf file obtained in the ANNOVAR section:
-scp dm6nr.refGene.gtf uvibgdkr@ft3.cesga.es://mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/provean_annotation
+#scp dm6nr.refGene.gtf uvibgdkr@ft3.cesga.es://mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/provean_annotation #Can be skipped, since it's the same as before
 
 #Upload the ancestral version of the .fa file obtained in the polarisation script:
-scp ancestral_dmel-all-chromosome-r6.14.fa uvibgdkr@ft3.cesga.es://mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/provean_annotation
+scp two_parsimony_ancestral-all-chromosome-r6.14.fa uvibgdkr@ft3.cesga.es://mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/provean_annotation
 
 ```
 
@@ -1320,16 +1260,16 @@ scp ancestral_dmel-all-chromosome-r6.14.fa uvibgdkr@ft3.cesga.es://mnt/lustre/sc
 cd /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/provean_annotation
 
 #Extract all variants from each gene and store them in variant files.
-mkdir -p genes_variants
-GENES=$(cat pools_individuals_nonsynonymous_gene_names.txt | cut -f 3 | sort -u)
+mkdir -p fi_genes_variants
+GENES=$(cat fast_inbreeding_nonsynonymous_gene_names.txt | cut -f 3 | sort -u)
 for gen in ${GENES[@]}
   do
   echo "$gen"
-  awk -v gene_name=$gen '$3 == gene_name {print $5}' pools_individuals_nonsynonymous_gene_names.txt > genes_variants/"$gen".var
+  awk -v gene_name=$gen '$3 == gene_name {print $5}' fast_inbreeding_nonsynonymous_gene_names.txt > fi_genes_variants/"$gen".var
   done
   
 #Replace parentheses with low dashes, since provean.sh isn't able to parse files with brackets in their name. Also remove square brackets.
-cd genes_variants
+cd fi_genes_variants
 GENES=$(ls *\(*)
 for old_name in ${GENES[@]}
   do
@@ -1348,54 +1288,54 @@ for old_name in ${GENES[@]}
 cd /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/provean_annotation
 
 #First generate a more readable version of the non-redundant annotation file, which keeps only necessary data, and transforms coordinates from 1-based (GTF format) to 0-based (BED format):
-awk -F'\t|gene_id \"|"; transcript_id |; exon_id "|"; gene_name' '($1 == "chr2L" || $1 == "chr2R" || $1 == "chr3L" || $1 == "chr3R" || $1 == "chr4" || $1 == "chrX") && $3=="CDS" {printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\n"),$1,$4-1,$5,$7,$8,$10,$12}' dm6nr.refGene.gtf > dm6nr.refGene.txt
+#awk -F'\t|gene_id \"|"; transcript_id |; exon_id "|"; gene_name' '($1 == "chr2L" || $1 == "chr2R" || $1 == "chr3L" || $1 == "chr3R" || $1 == "chr4" || $1 == "chrX") && $3=="CDS" {printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\n"),$1,$4-1,$5,$7,$8,$10,$12}' dm6nr.refGene.gtf > dm6nr.refGene.txt #Can be skipped, since it's the same as before
 
-#Then cross it with the list of genes with nonsynonymous variants to obtain coordinates for all CDS from all genes that will be analysed with Provean. I tried to do it faster using grep -Fwf but some genes have special characters (such as "-") which are not considered part of a word, so it introduces some mistakes. SO it's best to use this loop instead:
-GENES=$(cat pools_individuals_nonsynonymous_gene_names.txt | cut -f 3 | sort -u)
+#Then cross it with the list of genes with nonsynonymous variants to obtain coordinates for all CDS from all genes that will be analysed with Provean. I tried to do it faster using grep -Fwf but some genes have special characters (such as "-") which are not considered part of a word, so it introduces some mistakes. So it's best to use this loop instead:
+GENES=$(cat fast_inbreeding_nonsynonymous_gene_names.txt | cut -f 3 | sort -u)
 COUNTER=0
-rm pools_individuals_nonsynonymous.cds_list.dm6nr.refGene.txt
+rm fast_inbreeding_nonsynonymous.cds_list.dm6nr.refGene.txt
 for gen in ${GENES[@]}
   do
   #echo "${gen}"
-  awk -v gene_name=$gen '$6 == gene_name' dm6nr.refGene.txt >> pools_individuals_nonsynonymous.cds_list.dm6nr.refGene.txt
+  awk -v gene_name=$gen '$6 == gene_name' dm6nr.refGene.txt >> fast_inbreeding_nonsynonymous.cds_list.dm6nr.refGene.txt
   ((COUNTER++))
   if [ $(( $COUNTER % 100 )) == 0 ]
     then
     echo "processed $COUNTER genes out of $(echo "$GENES" | wc -l)"
   fi
   done
-awk -F"\t" '{OFS = FS} { gsub(/chr/,"", $1); print }' pools_individuals_nonsynonymous.cds_list.dm6nr.refGene.txt > pools_individuals_nonsynonymous.cds_list.dm6nr.refGene.bed #Remove the "chr" from the chromosome names to convert them into the same format that the fasta uses.
+awk -F"\t" '{OFS = FS} { gsub(/chr/,"", $1); print }' fast_inbreeding_nonsynonymous.cds_list.dm6nr.refGene.txt > fast_inbreeding_nonsynonymous.cds_list.dm6nr.refGene.bed #Remove the "chr" from the chromosome names to convert them into the same format that the fasta uses.
 
   ##Sanity checks:
-  cut -f6 pools_individuals_nonsynonymous.cds_list.dm6nr.refGene.bed | uniq | wc -l #3192 genes instead of the 3232 found in pools_individuals_nonsynonymous_gene_names.txt because some of the genes in the annovar database are not included in the UCSC .gtf file. 
-  comm -3 <(cut -f3 pools_individuals_nonsynonymous_gene_names.txt | sort -u) <(cut -f6 pools_individuals_nonsynonymous.cds_list.dm6nr.refGene.bed | sort -u) | wc -l #40, which is the correct result of 10612-10502. 
-  comm -3 <(cut -f3 pools_individuals_nonsynonymous_gene_names.txt | sort -u) <(cut -f6 pools_individuals_nonsynonymous.cds_list.dm6nr.refGene.bed | sort -u) | less -S #All results are displayed in the first column, which means that all missing entries are missing in the second file, and none from the second file are missing in the first one.
+  cut -f6 fast_inbreeding_nonsynonymous.cds_list.dm6nr.refGene.bed | uniq | wc -l #8081 genes instead of the 8160 found in fast_inbreeding_nonsynonymous_gene_names.txt because some of the genes in the annovar database are not included in the UCSC .gtf file. 
+  comm -3 <(cut -f3 fast_inbreeding_nonsynonymous_gene_names.txt | sort -u) <(cut -f6 fast_inbreeding_nonsynonymous.cds_list.dm6nr.refGene.bed | sort -u) | wc -l #79, which is the correct result of 8160-8081 
+  comm -3 <(cut -f3 fast_inbreeding_nonsynonymous_gene_names.txt | sort -u) <(cut -f6 fast_inbreeding_nonsynonymous.cds_list.dm6nr.refGene.bed | sort -u) | less -S #All results are displayed in the first column, which means that all missing entries are missing in the second file, and none from the second file are missing in the first one.
 
 #Retrieve reference sequences for all CDS (from the ancestral fasta to account for polarisation).
 module load bedtools/2.30.0
-rm ancestral_dmel-all-chromosome-r6.14.fa.fai
-bedtools getfasta -fi ancestral_dmel-all-chromosome-r6.14.fa -bed pools_individuals_nonsynonymous.cds_list.dm6nr.refGene.bed -fo pools_individuals_nonsynonymous.cds_sequence.fa
+rm two_parsimony_ancestral-all-chromosome-r6.14.fa.fai
+bedtools getfasta -fi two_parsimony_ancestral-all-chromosome-r6.14.fa -bed fast_inbreeding_nonsynonymous.cds_list.dm6nr.refGene.bed -fo fast_inbreeding_nonsynonymous.cds_sequence.fa
 
   ##Sanity checks:
-  grep -v '>' pools_individuals_nonsynonymous.cds_sequence.fa | wc -l #15348, which is the same number of CDS (lines) in the file pools_individuals_nonsynonymous.cds_list.dm6nr.refGene.bed.
+  grep -v '>' fast_inbreeding_nonsynonymous.cds_sequence.fa | wc -l #35715, which is the same number of CDS (lines) in the file fast_inbreeding_nonsynonymous.cds_list.dm6nr.refGene.bed.
 
 #Paste each CDS' sequence with the rest of the information.
-paste pools_individuals_nonsynonymous.cds_list.dm6nr.refGene.bed <(grep -v '>' pools_individuals_nonsynonymous.cds_sequence.fa) > pools_individuals_nonsynonymous.cds_list_and_sequence.dm6nr.refGene.bed
+paste fast_inbreeding_nonsynonymous.cds_list.dm6nr.refGene.bed <(grep -v '>' fast_inbreeding_nonsynonymous.cds_sequence.fa) > fast_inbreeding_nonsynonymous.cds_list_and_sequence.dm6nr.refGene.bed
 
   ##Sanity checks:
-  awk '{printf ("%s\t%s\n"),$3-$2,length($8)}' pools_individuals_nonsynonymous.cds_list_and_sequence.dm6nr.refGene.bed | awk '$1==$2' | wc -l #15348, which means that all retrieved sequences have the correct length (the same as the difference between their start and their end points).
+  awk '{printf ("%s\t%s\n"),$3-$2,length($8)}' fast_inbreeding_nonsynonymous.cds_list_and_sequence.dm6nr.refGene.bed | awk '$1==$2' | wc -l #35715, which means that all retrieved sequences have the correct length (the same as the difference between their start and their end points).
 
 #Fuse all exons from each gene and store them in a file together with the gene name and the strand information.
-GENES=$(cat pools_individuals_nonsynonymous.cds_list_and_sequence.dm6nr.refGene.bed | cut -f 6 | sort -u)
+GENES=$(cat fast_inbreeding_nonsynonymous.cds_list_and_sequence.dm6nr.refGene.bed | cut -f 6 | sort -u)
 TOTAL=$(echo "$GENES" | wc -l)
 COUNTER=0
-rm pools_individuals_nonsynonymous.cds_list_and_sequence_combined.dm6nr.refGene.bed
+rm fast_inbreeding_nonsynonymous.cds_list_and_sequence_combined.dm6nr.refGene.bed
 for gen in ${GENES[@]}
   do
   #echo "${gen}"
-  STRAND=$(awk -F"\t" -v gen=$gen '$6 == gen' pools_individuals_nonsynonymous.cds_list_and_sequence.dm6nr.refGene.bed | shuf -n1 | cut -f 4)
-  CODING_SEQUENCE=$(awk -F"\t" -v gen=$gen '$6 == gen {print $8}' pools_individuals_nonsynonymous.cds_list_and_sequence.dm6nr.refGene.bed | tr -d '\n')
-  echo -e "$gen\t$STRAND\t$CODING_SEQUENCE" >> pools_individuals_nonsynonymous.cds_list_and_sequence_combined.dm6nr.refGene.bed
+  STRAND=$(awk -F"\t" -v gen=$gen '$6 == gen' fast_inbreeding_nonsynonymous.cds_list_and_sequence.dm6nr.refGene.bed | shuf -n1 | cut -f 4)
+  CODING_SEQUENCE=$(awk -F"\t" -v gen=$gen '$6 == gen {print $8}' fast_inbreeding_nonsynonymous.cds_list_and_sequence.dm6nr.refGene.bed | tr -d '\n')
+  echo -e "$gen\t$STRAND\t$CODING_SEQUENCE" >> fast_inbreeding_nonsynonymous.cds_list_and_sequence_combined.dm6nr.refGene.bed
   ((COUNTER++))
   if [ $(( $COUNTER % 50 )) == 0 ]
     then
@@ -1404,8 +1344,8 @@ for gen in ${GENES[@]}
   done
 
 #Translate the exons to proteins using an external website and store each protein in a fasta file:
-mkdir -p genes_fasta
-TOTAL=$(cat pools_individuals_nonsynonymous.cds_list_and_sequence_combined.dm6nr.refGene.bed | wc -l)
+mkdir -p fi_genes_fasta
+TOTAL=$(cat fast_inbreeding_nonsynonymous.cds_list_and_sequence_combined.dm6nr.refGene.bed | wc -l)
 COUNTER=0
 while read -r GENE STRAND CODING_SEQUENCE; do
   #GENE=$(echo "$entry" | cut -f 1)
@@ -1416,10 +1356,10 @@ while read -r GENE STRAND CODING_SEQUENCE; do
   #echo $CODING_SEQUENCE
   if [ $STRAND == "+" ]
     then
-    curl -s -d "dna_sequence=$CODING_SEQUENCE&output_format=fasta" -A "${GENE}" https://web.expasy.org/cgi-bin/translate/dna2aa.cgi | awk '/:5'\''3'\'' Frame 1$/,/:5'\''3'\'' Frame 2$/' | head -n-1 | sed -r '/^\s*$/d' | sed 's/-/X/g' > genes_fasta/"$GENE".fa #sends the DNA sequence to the expasy website, then selects the lines for the proper strand (here: +) between the header for Frame 1 and the header for Frame 2, then removes the header for Frame 2, then removes any empty line that may exist, then replaces any existing hyphen by an X (unknown aminoacid) so that Provean doesn't crash.
+    curl -s -d "dna_sequence=$CODING_SEQUENCE&output_format=fasta" -A "${GENE}" https://web.expasy.org/cgi-bin/translate/dna2aa.cgi | awk '/:5'\''3'\'' Frame 1$/,/:5'\''3'\'' Frame 2$/' | head -n-1 | sed -r '/^\s*$/d' | sed 's/-/X/g' > fi_genes_fasta/"$GENE".fa #sends the DNA sequence to the expasy website, then selects the lines for the proper strand (here: +) between the header for Frame 1 and the header for Frame 2, then removes the header for Frame 2, then removes any empty line that may exist, then replaces any existing hyphen by an X (unknown aminoacid) so that Provean doesn't crash.
   elif [ $STRAND == "-" ]
     then
-    curl -s -d "dna_sequence=$CODING_SEQUENCE&output_format=fasta" -A "${GENE}" https://web.expasy.org/cgi-bin/translate/dna2aa.cgi | awk '/:3'\''5'\'' Frame 1$/,/:3'\''5'\'' Frame 2$/' | head -n-1 | sed -r '/^\s*$/d' | sed 's/-/X/g' > genes_fasta/"$GENE".fa #sends the DNA sequence to the expasy website, then selects the lines for the proper strand (here: -) between the header for Frame 1 and the header for Frame 2, then removes the header for Frame 2, then removes any empty line that may exist, then replaces any existing hyphen by an X (unknown aminoacid) so that Provean doesn't crash.
+    curl -s -d "dna_sequence=$CODING_SEQUENCE&output_format=fasta" -A "${GENE}" https://web.expasy.org/cgi-bin/translate/dna2aa.cgi | awk '/:3'\''5'\'' Frame 1$/,/:3'\''5'\'' Frame 2$/' | head -n-1 | sed -r '/^\s*$/d' | sed 's/-/X/g' > fi_genes_fasta/"$GENE".fa #sends the DNA sequence to the expasy website, then selects the lines for the proper strand (here: -) between the header for Frame 1 and the header for Frame 2, then removes the header for Frame 2, then removes any empty line that may exist, then replaces any existing hyphen by an X (unknown aminoacid) so that Provean doesn't crash.
   fi
   ((COUNTER++))
   if [ $(( $COUNTER % 2 )) == 0 ]
@@ -1427,79 +1367,7 @@ while read -r GENE STRAND CODING_SEQUENCE; do
     echo "processed $COUNTER genes out of $TOTAL"
   fi
   sleep 1
-  done < pools_individuals_nonsynonymous.cds_list_and_sequence_combined.dm6nr.refGene.bed
-
-```
-
-####Convert to aminoacidic sequence.
-#####nucleotide_to_aminoacid.sh
-```{bash}
-
-#!/bin/bash
-#SBATCH -p thinnodes
-#SBATCH -J nucleotide_to_aminoacid
-#SBATCH -o nucleotide_to_aminoacid_%A.out
-#SBATCH -t 00:05:00              # Run time (hh:mm:ss)
-#SBATCH -c 6
-#SBATCH --mail-type=TIME_LIMIT_80
-#SBATCH --mail-user=dkmanruiz@gmail.com
-
-#Translate the exons to proteins using an external website and store each protein in a fasta file:
-
-cd /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/provean_annotation
-
-TOTAL=$(cat $1 | wc -l)
-COUNTER=0
-while read -r GENE STRAND CODING_SEQUENCE; do
-  #GENE=$(echo "$entry" | cut -f 1)
-  echo $GENE
-  #STRAND=$(echo "$entry" | cut -f 2)
-  #echo $STRAND
-  #CODING_SEQUENCE=$(echo "$entry" | cut -f 3)
-  #echo $CODING_SEQUENCE
-  if [ $STRAND == "+" ]
-    then
-    curl -s -d "dna_sequence=$CODING_SEQUENCE&output_format=fasta" -A "${GENE}" https://web.expasy.org/cgi-bin/translate/dna2aa.cgi | awk '/:5'\''3'\'' Frame 1$/,/:5'\''3'\'' Frame 2$/' | head -n-1 | sed -r '/^\s*$/d' | sed 's/-/X/g' > genes_fasta/"$GENE".fa #sends the DNA sequence to the expasy website, then selects the lines for the proper strand (here: +) between the header for Frame 1 and the header for Frame 2, then removes the header for Frame 2, then removes any empty line that may exist, then replaces any existing hyphen by an X (unknown aminoacid) so that Provean doesn't crash.
-  elif [ $STRAND == "-" ]
-    then
-    curl -s -d "dna_sequence=$CODING_SEQUENCE&output_format=fasta" -A "${GENE}" https://web.expasy.org/cgi-bin/translate/dna2aa.cgi | awk '/:3'\''5'\'' Frame 1$/,/:3'\''5'\'' Frame 2$/' | head -n-1 | sed -r '/^\s*$/d' | sed 's/-/X/g' > genes_fasta/"$GENE".fa #sends the DNA sequence to the expasy website, then selects the lines for the proper strand (here: -) between the header for Frame 1 and the header for Frame 2, then removes the header for Frame 2, then removes any empty line that may exist, then replaces any existing hyphen by an X (unknown aminoacid) so that Provean doesn't crash.
-  fi
-  ((COUNTER++))
-  if [ $(( $COUNTER % 50 )) == 0 ]
-    then
-    echo "processed $COUNTER genes out of $TOTAL"
-  fi
-  sleep 2
-  done < $1
-
-```
-
-#####Send the job:
-```{bash}
-
-cd /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/provean_annotation
-
-PARALLEL=4
-FILENAME=pools_individuals_nonsynonymous.cds_list_and_sequence_combined.dm6nr.refGene.bed
-TOTAL=$(wc -l < $FILENAME)
-BLOCK_SIZE=$(echo "scale=0; $TOTAL/$PARALLEL" | bc)
-for ((i=1; i<PARALLEL; i++))
-  do
-  START=$((((i-1))*BLOCK_SIZE+1))
-  echo $START
-  END=$((BLOCK_SIZE*i))
-  echo $END
-  sed -n "${START},${END}p" $FILENAME > ${FILENAME/.bed/.chunk_${i}.bed}
-  done
-START=$((((i-1))*BLOCK_SIZE+1))
-echo $START
-echo $TOTAL
-sed -n "${START},${TOTAL}p" $FILENAME > ${FILENAME/.bed/.chunk_${i}.bed}
-
-for ((i=1; i<=PARALLEL; i++))
-  do
-  sbatch -J nucleotide_to_aminoacid -o nucleotide_to_aminoacid.chunk_${i}.%A.out cd /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/provean_annotation/nucleotide_to_aminoacid.sh ${FILENAME/.bed/.chunk_${i}.bed}
-  done
+  done < fast_inbreeding_nonsynonymous.cds_list_and_sequence_combined.dm6nr.refGene.bed
 
 ```
 
@@ -1507,7 +1375,7 @@ for ((i=1; i<=PARALLEL; i++))
 ```{bash}
 
 #Replace parentheses with low dashes, since provean.sh isn't able to parse files with brackets in their name. Also remove square brackets.
-cd /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/provean_annotation/genes_fasta
+cd /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/provean_annotation/fi_genes_fasta
 GENES=$(ls *\(*)
 for old_name in ${GENES[@]}
   do
@@ -1519,7 +1387,7 @@ for old_name in ${GENES[@]}
 
 ```
 
-##Configure Provean:
+##!!!Configure Provean:
 ```{bash}
 
 cd /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/
@@ -1558,7 +1426,7 @@ BLASTDBCMD="/mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/ncbi-blast-2.4.0+/bin/blas
 ```{bash}
 
 cd /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/provean_annotation
-cut -f1 pools_individuals_nonsynonymous.cds_list_and_sequence_combined.dm6nr.refGene.bed > gene_list.txt
+cut -f1 fast_inbreeding_nonsynonymous.cds_list_and_sequence_combined.dm6nr.refGene.bed > gene_list.txt
 mkdir -p provean_output
 mkdir -p genes_support
 
@@ -2178,16 +2046,16 @@ for GENE in ${GENES[@]}
 #From the cluster:
 cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/provean
 VCF=/share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.polarized.nr_annovar.dm6nr_multianno.vcf
-grep '^#' $VCF > pools_individuals_nonsynonymous.vcf
-grep -e 'refGene=exonic;.*nonsynonymous' $VCF >> pools_individuals_nonsynonymous.vcf #66610
-scp pools_individuals_nonsynonymous.vcf uvibgdkr@ft3.cesga.es://mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/provean_annotation
+grep '^#' $VCF > fast_inbreeding_nonsynonymous.vcf
+grep -e 'refGene=exonic;.*nonsynonymous' $VCF >> fast_inbreeding_nonsynonymous.vcf #66610
+scp fast_inbreeding_nonsynonymous.vcf uvibgdkr@ft3.cesga.es://mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/provean_annotation
 
 #From CESGA:
 module load bedtools/2.30.0 
 
 cd /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/provean_annotation
-VCF=pools_individuals_nonsynonymous.vcf #66610
-sort -f -k3,3 -k5,5 pools_individuals_nonsynonymous_gene_names.txt > pools_individuals_nonsynonymous_gene_names.gene_aa_sorted.txt
+VCF=fast_inbreeding_nonsynonymous.vcf #66610
+sort -f -k3,3 -k5,5 fast_inbreeding_nonsynonymous_gene_names.txt > fast_inbreeding_nonsynonymous_gene_names.gene_aa_sorted.txt
 
 #Combine info for each gene and mutation:
 rm missense_variants_provean_scores.gene_aa_sorted.txt
@@ -2197,7 +2065,7 @@ TOTAL=$(ls provean_output/*.provean | wc -l)
 for gen in ${GENE_LIST[@]}
   do
   echo "${gen}"
-  join -i -1 5 -2 1 <(awk -v gene=$gen '$3==gene' pools_individuals_nonsynonymous_gene_names.gene_aa_sorted.txt) <(grep -Ev '#|\[' provean_output/"$gen".provean | sort -f -k1,1) | awk '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $2,$3,$4,$5,$1,$6)}' >> missense_variants_provean_scores.gene_aa_sorted.txt
+  join -i -1 5 -2 1 <(awk -v gene=$gen '$3==gene' fast_inbreeding_nonsynonymous_gene_names.gene_aa_sorted.txt) <(grep -Ev '#|\[' provean_output/"$gen".provean | sort -f -k1,1) | awk '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $2,$3,$4,$5,$1,$6)}' >> missense_variants_provean_scores.gene_aa_sorted.txt
   ((COUNTER++))
   if [ $(( $COUNTER % 100 )) == 0 ]
     then
@@ -2215,11 +2083,11 @@ cat missense_variants_provean_scores.new_ones.bed missense_variants_provean_scor
 
 #Sanity checks:
 ##Inputs:
-awk -F "\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5)}' /mnt/netapp2/Store_uni/home/uvi/bg/dkr/provean_annotation/pools_individuals_nonsynonymous_gene_names.txt | sort -k1,1 -k2,2n | uniq | wc -l #61965 (original input)
-awk -F "\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5)}' pools_individuals_nonsynonymous_gene_names.txt | sort -k1,1 -k2,2n | uniq | wc -l #5474 (new input)
-bedtools intersect -a <(awk -F "\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5)}' /mnt/netapp2/Store_uni/home/uvi/bg/dkr/provean_annotation/pools_individuals_nonsynonymous_gene_names.txt | sort -k1,1 -k2,2n | uniq) -b <(awk -F "\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5)}' pools_individuals_nonsynonymous_gene_names.txt | sort -k1,1 -k2,2n | uniq) | wc -l #90 (mutations in both, i.e., those with a polarisation change)
-bedtools subtract -a <(awk -F "\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5)}' /mnt/netapp2/Store_uni/home/uvi/bg/dkr/provean_annotation/pools_individuals_nonsynonymous_gene_names.txt | sort -k1,1 -k2,2n | uniq) -b <(awk -F "\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5)}' pools_individuals_nonsynonymous_gene_names.txt | sort -k1,1 -k2,2n | uniq) | wc -l #61875 (mutations in the old dataset which haven't been repeated in the new one)
-bedtools subtract -a <(awk -F "\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5)}' pools_individuals_nonsynonymous_gene_names.txt | sort -k1,1 -k2,2n | uniq) -b <(awk -F "\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5)}' /mnt/netapp2/Store_uni/home/uvi/bg/dkr/provean_annotation/pools_individuals_nonsynonymous_gene_names.txt | sort -k1,1 -k2,2n | uniq) | wc -l #5384 (mutations exclusive to the new dataset)
+awk -F "\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5)}' /mnt/netapp2/Store_uni/home/uvi/bg/dkr/provean_annotation/fast_inbreeding_nonsynonymous_gene_names.txt | sort -k1,1 -k2,2n | uniq | wc -l #61965 (original input)
+awk -F "\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5)}' fast_inbreeding_nonsynonymous_gene_names.txt | sort -k1,1 -k2,2n | uniq | wc -l #5474 (new input)
+bedtools intersect -a <(awk -F "\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5)}' /mnt/netapp2/Store_uni/home/uvi/bg/dkr/provean_annotation/fast_inbreeding_nonsynonymous_gene_names.txt | sort -k1,1 -k2,2n | uniq) -b <(awk -F "\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5)}' fast_inbreeding_nonsynonymous_gene_names.txt | sort -k1,1 -k2,2n | uniq) | wc -l #90 (mutations in both, i.e., those with a polarisation change)
+bedtools subtract -a <(awk -F "\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5)}' /mnt/netapp2/Store_uni/home/uvi/bg/dkr/provean_annotation/fast_inbreeding_nonsynonymous_gene_names.txt | sort -k1,1 -k2,2n | uniq) -b <(awk -F "\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5)}' fast_inbreeding_nonsynonymous_gene_names.txt | sort -k1,1 -k2,2n | uniq) | wc -l #61875 (mutations in the old dataset which haven't been repeated in the new one)
+bedtools subtract -a <(awk -F "\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5)}' fast_inbreeding_nonsynonymous_gene_names.txt | sort -k1,1 -k2,2n | uniq) -b <(awk -F "\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5)}' /mnt/netapp2/Store_uni/home/uvi/bg/dkr/provean_annotation/fast_inbreeding_nonsynonymous_gene_names.txt | sort -k1,1 -k2,2n | uniq) | wc -l #5384 (mutations exclusive to the new dataset)
 #So, in short, out of 5474 mutations in the Provean input of the original dataset, 90 were already in the old one (polarisation changes), while the remaining 5384 are new. Because Provean hasn't been able to process certain genes, the numbers in the output files should be a bit lower than these.
 
 ##Outputs:
@@ -2247,15 +2115,15 @@ bedtools intersect -a <(bedtools subtract -a <(awk -F "\t" '{printf ("%s\t%s\t%s
 rm /mnt/netapp2/Store_uni/home/uvi/bg/dkr/provean_annotation/missense_variants_provean_scores.parentheses_gene_aa_sorted.txt
 rm missense_variants_provean_scores.parentheses_gene_aa_sorted.txt
 COUNTER=0
-GENE_LIST=$(cat <(cut -f3 pools_individuals_nonsynonymous_gene_names.gene_aa_sorted.txt | grep "(" | sort | uniq) <(cut -f3 /mnt/netapp2/Store_uni/home/uvi/bg/dkr/provean_annotation/pools_individuals_nonsynonymous_gene_names.gene_aa_sorted.txt | grep "(" | sort | uniq))
+GENE_LIST=$(cat <(cut -f3 fast_inbreeding_nonsynonymous_gene_names.gene_aa_sorted.txt | grep "(" | sort | uniq) <(cut -f3 /mnt/netapp2/Store_uni/home/uvi/bg/dkr/provean_annotation/fast_inbreeding_nonsynonymous_gene_names.gene_aa_sorted.txt | grep "(" | sort | uniq))
 TOTAL=$(echo "${GENE_LIST}" | wc -l)
 for gen in ${GENE_LIST[@]}
   do
   gen_bis=$(echo "${gen}" | tr '()' '__')
   #Old dataset:
-  join -i -1 5 -2 1 <(awk -v gene=$gen '$3==gene' /mnt/netapp2/Store_uni/home/uvi/bg/dkr/provean_annotation/pools_individuals_nonsynonymous_gene_names.gene_aa_sorted.txt) <(grep -Ev '#|\[' /mnt/netapp2/Store_uni/home/uvi/bg/dkr/provean_annotation/provean_output/"$gen_bis".provean | sort -f -k1,1) | awk -v gene=$gen_bis '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $2,$3,gene,$5,$1,$6)}' >> /mnt/netapp2/Store_uni/home/uvi/bg/dkr/provean_annotation/missense_variants_provean_scores.parentheses_gene_aa_sorted.txt
+  join -i -1 5 -2 1 <(awk -v gene=$gen '$3==gene' /mnt/netapp2/Store_uni/home/uvi/bg/dkr/provean_annotation/fast_inbreeding_nonsynonymous_gene_names.gene_aa_sorted.txt) <(grep -Ev '#|\[' /mnt/netapp2/Store_uni/home/uvi/bg/dkr/provean_annotation/provean_output/"$gen_bis".provean | sort -f -k1,1) | awk -v gene=$gen_bis '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $2,$3,gene,$5,$1,$6)}' >> /mnt/netapp2/Store_uni/home/uvi/bg/dkr/provean_annotation/missense_variants_provean_scores.parentheses_gene_aa_sorted.txt
   #New dataset:
-  join -i -1 5 -2 1 <(awk -v gene=$gen '$3==gene' pools_individuals_nonsynonymous_gene_names.gene_aa_sorted.txt) <(grep -Ev '#|\[' provean_output/"$gen_bis".provean | sort -f -k1,1) | awk -v gene=$gen_bis '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $2,$3,gene,$5,$1,$6)}' >> missense_variants_provean_scores.parentheses_gene_aa_sorted.txt
+  join -i -1 5 -2 1 <(awk -v gene=$gen '$3==gene' fast_inbreeding_nonsynonymous_gene_names.gene_aa_sorted.txt) <(grep -Ev '#|\[' provean_output/"$gen_bis".provean | sort -f -k1,1) | awk -v gene=$gen_bis '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $2,$3,gene,$5,$1,$6)}' >> missense_variants_provean_scores.parentheses_gene_aa_sorted.txt
   ((COUNTER++))
   if [ $(( $COUNTER % 10 )) == 0 ]
     then
@@ -2285,15 +2153,15 @@ awk -F"\t" -v thres=$THRESHOLD '$7 > thres {printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\
 module load bedtools/2.30.0
 cd /mnt/lustre/scratch/nlsas/home/uvi/bg/dkr/provean_annotation
 
-awk -F "\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5)}' pools_individuals_nonsynonymous_gene_names.txt | sort -k1,1 -k2,2n | uniq | wc -l #5474 (new) unique mutations in the input
+awk -F "\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5)}' fast_inbreeding_nonsynonymous_gene_names.txt | sort -k1,1 -k2,2n | uniq | wc -l #5474 (new) unique mutations in the input
 
 awk -F "\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5,$6)}' missense_variants_provean_scores.gene_aa_sorted.txt | sort -k1,1 -k2,2n | uniq | wc -l #5340 (new) unique mutations in the output
 
 #Mutations which were in the Provean input but not the output:
-bedtools subtract -a <(awk -F "\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5)}' pools_individuals_nonsynonymous_gene_names.txt | sort -k1,1 -k2,2n | uniq) -b <(awk -F "\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5,$6)}' missense_variants_provean_scores.gene_aa_sorted.txt | sort -k1,1 -k2,2n | uniq) > pools_individuals_nonsynonymous_gene_names.unprocessed.txt #134 unprocessed or unretrieved mutations, which is the correct result for 5474 - 5340
+bedtools subtract -a <(awk -F "\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5)}' fast_inbreeding_nonsynonymous_gene_names.txt | sort -k1,1 -k2,2n | uniq) -b <(awk -F "\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5,$6)}' missense_variants_provean_scores.gene_aa_sorted.txt | sort -k1,1 -k2,2n | uniq) > fast_inbreeding_nonsynonymous_gene_names.unprocessed.txt #134 unprocessed or unretrieved mutations, which is the correct result for 5474 - 5340
 
 #Mutations which were in the Provean output but not the input:
-bedtools subtract -a <(awk -F "\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5,$6)}' missense_variants_provean_scores.gene_aa_sorted.txt | sort -k1,1 -k2,2n | uniq) -b <(awk -F "\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5)}' pools_individuals_nonsynonymous_gene_names.txt | sort -k1,1 -k2,2n | uniq) | wc -l #0 artifacts
+bedtools subtract -a <(awk -F "\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5,$6)}' missense_variants_provean_scores.gene_aa_sorted.txt | sort -k1,1 -k2,2n | uniq) -b <(awk -F "\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5)}' fast_inbreeding_nonsynonymous_gene_names.txt | sort -k1,1 -k2,2n | uniq) | wc -l #0 artifacts
 
 ```
 
