@@ -230,4 +230,3 @@ rm Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.bcftools_merge.list
 awk '$1=="X"' /share/rdata/ramon.pouso/polarisation/estsfs/output/final_snp_set.orthologs.sum_gen0_gen20_gen30_allele_counts.extrapolated_to_100.ancestral_vs_derived_complete.confident.rate6.pval.bed | bedtools intersect -a Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.vcf -b stdin -header > Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.final_snp_set.vcf
 
 ```
-
