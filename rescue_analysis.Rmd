@@ -1,0 +1,231 @@
+---
+title: "rescue_analysis"
+output: html_document
+date: "2024-01-25"
+---
+
+#1. Process raw reads:
+##Prepare raw files:
+###Copy all raw files:
+```{R, engine='bash'}
+
+#First, copy all the raw files from Humberto's folder to my folder for this project:
+mkdir -p /share/rdata2/dani_k/proyecto_rescate/FASTQ/
+cd /share/rdata2/dani_k/proyecto_rescate/FASTQ/
+scp -p /share/rdata2/humberto/rescate/data/[NR]*fastq.gz /share/rdata2/dani_k/proyecto_rescate/FASTQ/
+
+```
+
+###Check copy process:
+```{R, engine='bash'}
+
+cd /share/rdata2/dani_k/proyecto_rescate/FASTQ/
+
+#First, generate md5sum records for the 'original' files (in Humberto's folder):
+md5sum /share/rdata2/humberto/rescate/data/[NR]*fastq.gz > md5sum_summary.original.txt
+
+#Second, generate md5sum records for the copied files (in my folder):
+md5sum [NR]*fastq.gz > md5sum_summary.copy.txt
+
+#Then check that md5sum_summary.original.txt and md5sum_summary.copy.txt files are identical. They are!
+
+```
+
+###Arrange files in folders:
+```{R, engine='bash'}
+
+cd /share/rdata2/dani_k/proyecto_rescate/FASTQ/
+
+SAMPLES=$(ls [NR]*fastq.gz | cut -d'_' -f1 | sort -u)
+for sample in ${SAMPLES[@]}
+  do
+  echo $sample
+  mkdir $sample
+  mv $sample*fastq.gz $sample/
+  done
+
+```
+
+
+##Check fastqc quality:
+###fastqc_reports.sh
+```{R, engine='bash'}
+
+module load fastqc/0.11.8
+
+FOLDER=$(ls -d */ | cat -n | awk -v id=$SGE_TASK_ID -F "\t" '{if ($1==id) printf ("%s\n", $2)}')
+cd $FOLDER
+
+for file in $(ls *.fastq.gz)
+  do
+  echo $file
+  fastqc $file
+  done
+
+```
+
+###Send parallel array-jobs:
+```{R, engine='bash'}
+
+#Launch it as follows:
+cd /share/rdata2/dani_k/proyecto_rescate/FASTQ/
+N_FILES=$(ls -d */ | wc -l)
+qsub -cwd -l h=compute-0-9 -t 1-$N_FILES /share/rdata2/dani_k/proyecto_rescate/FASTQ/fastqc_reports.sh
+
+```
+
+###Download reports:
+```{bash}
+
+export SSHPASS=$(cat /Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/rua2.txt)
+
+#Adequate error relativised by Pb:
+sshpass -e scp ramon.pouso@rua2.uvigo.es://share/rdata2/dani_k/proyecto_rescate/FASTQ/*/*_fastqc.html /Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/depresion_esteriles/fastqc/
+
+```
+
+
+##Remove adapters:
+###trimmomatic_trim.sh
+```{R, engine='bash'}
+
+module load trimmomatic/0.38
+
+cd /share/rdata2/dani_k/proyecto_rescate/FASTQ
+FOLDER=$(ls -d */ | cat -n | awk -v id=$SGE_TASK_ID -F "\t" '{if ($1==id) printf ("%s\n", $2)}')
+cd $FOLDER
+
+sample=$(echo $FOLDER | cut -d"/" -f1)
+java -jar /share/apps/trimmomatic/0.38/trimmomatic-0.38.jar PE "${sample}_1.fastq.gz" "${sample}_2.fastq.gz" -baseout "${sample}_noadapt.fastq.gz" ILLUMINACLIP:/share/apps/trimmomatic/0.38/adapters/NexteraPE-PE.fa:2:30:10
+
+#Save this code as: /share/rdata2/dani_k/proyecto_rescate/FASTQ/trimmomatic_trim.sh
+
+```
+
+###Send array-jobs:
+```{R, engine='bash'}
+
+#Launch it as follows:
+cd /share/rdata2/dani_k/proyecto_rescate/FASTQ/
+N_FILES=$(ls -d */ | wc -l)
+qsub -cwd -l h=compute-0-9 -t 1-$N_FILES /share/rdata2/dani_k/proyecto_rescate/FASTQ/trimmomatic_trim.sh
+
+```
+
+
+##Trim reads:
+###erne_trim.sh
+```{R, engine='bash'}
+
+module load erne/2.1.1
+
+cd /share/rdata2/dani_k/proyecto_rescate/FASTQ
+FOLDER=$(ls -d */ | cat -n | awk -v id=$SGE_TASK_ID -F "\t" '{if ($1==id) printf ("%s\n", $2)}')
+cd $FOLDER
+
+sample=$(echo $FOLDER | cut -d"/" -f1)
+erne-filter --min-size 36 --query1 "${sample}_noadapt_1P.fastq.gz" --query2 "${sample}_noadapt_2P.fastq.gz" --output-prefix "${sample}_noadapt_trimmed" --gzip
+
+#Save this code as: /share/rdata2/dani_k/proyecto_rescate/FASTQ/erne_trim.sh
+
+```
+
+###Send array-jobs:
+```{R, engine='bash'}
+
+#Launch it as follows:
+cd /share/rdata2/dani_k/proyecto_rescate/FASTQ/
+N_FILES=$(ls -d */ | wc -l)
+qsub -cwd -l h=compute-0-9 -t 1-$N_FILES /share/rdata2/dani_k/proyecto_rescate/FASTQ/erne_trim.sh
+
+```
+
+!!!
+##Compress reads:
+###gzip_reads.sh
+```{R, engine='bash'}
+
+FOLDER=$(ls -d */ | cat -n | awk -v id=$SGE_TASK_ID -F "\t" '{if ($1==id) printf ("%s\n", $2)}')
+cd $FOLDER
+
+for file in $(ls *.fastq)
+  do
+  echo "Compressing $file"
+  gzip $file
+  done
+
+#Save this code as: /DATA/rdata2/dani_k/consanguinidad_rapida/FASTQ/gzip_reads.sh
+
+```
+
+###Send parallel array-jobs:
+```{R, engine='bash'}
+
+#Compress trimmed reads for storage purposes.
+
+#Launch it as follows:
+cd /share/rdata2/dani_k/consanguinidad_rapida/FASTQ/
+qsub -cwd -l h=compute-0-9 -t 1-20 /share/rdata2/dani_k/consanguinidad_rapida/FASTQ/gzip_reads.sh
+
+```
+
+
+##Merge reads:
+###merge_reads.sh
+```{R, engine='bash'}
+
+cd /DATA/rdata2/dani_k/consanguinidad_rapida/FASTQ
+FOLDER=$(ls -d Sample_pool* | cat -n | awk -v id=$SGE_TASK_ID -F "\t" '{if ($1==id) printf ("%s\n", $2)}')
+echo $FOLDER
+cd $FOLDER
+ADAPTER=$(ls ${FOLDER/Sample_/}*_trimmed_1.fastq.gz | head -n1 | cut -d'_' -f3)
+cat ${FOLDER/Sample_/}*_trimmed_1.fastq.gz > ${FOLDER/Sample_/}_${ADAPTER}_Lmerged_trimmed_1.fastq.gz
+cat ${FOLDER/Sample_/}*_trimmed_2.fastq.gz > ${FOLDER/Sample_/}_${ADAPTER}_Lmerged_trimmed_2.fastq.gz
+cat ${FOLDER/Sample_/}*_trimmed_unpaired.fastq.gz > ${FOLDER/Sample_/}_${ADAPTER}_Lmerged_trimmed_unpaired.fastq.gz
+
+#Save this code as: /DATA/rdata2/dani_k/consanguinidad_rapida/FASTQ/merge_reads.sh
+
+```
+
+###Send parallel array-jobs:
+```{R, engine='bash'}
+
+#For each pool, merge all FASTQ files into a single file.
+
+#Launch it as follows:
+cd /share/rdata2/dani_k/consanguinidad_rapida/FASTQ/
+qsub -cwd -l h=compute-0-9 -t 1-20 /share/rdata2/dani_k/consanguinidad_rapida/FASTQ/merge_reads.sh
+
+```
+
+
+##Align reads:
+###bwa_mem_align_reads.sh
+```{R, engine='bash'}
+
+module load bwa/0.7.15
+cd /DATA/rdata2/dani_k/consanguinidad_rapida/FASTQ
+
+GEN=$1
+FOLDER=$(ls -d Sample_pool*_$GEN | cat -n | awk -v id=$SGE_TASK_ID -F "\t" '{if ($1==id) printf ("%s\n", $2)}')
+echo $FOLDER
+cd $FOLDER
+ADAPTER=$(ls ${FOLDER/Sample_/}*_trimmed_1.fastq.gz | head -n1 | cut -d'_' -f3)
+
+echo "Aligning reads"
+bwa mem -t 4 -M /share/rdata/ramon.pouso/reference/indexed_reference/dmel-all-chromosome-r6.14.fasta.gz ${FOLDER/Sample_/}_${ADAPTER}_Lmerged_trimmed_1.fastq.gz ${FOLDER/Sample_/}_${ADAPTER}_Lmerged_trimmed_2.fastq.gz > /DATA/rdata2/dani_k/consanguinidad_rapida/BAM/${FOLDER/Sample_/}_trimmed_bwa.sam
+
+#Save this code as: /DATA/rdata2/dani_k/consanguinidad_rapida/FASTQ/bwa_mem_align_reads.sh
+
+```
+
+###Send parallel array-jobs:
+```{R, engine='bash'}
+
+#NOTE: I believe I actually launched it in two halves, each using 10 processors.
+
+#Launch it as follows:
+cd /share/rdata2/dani_k/consanguinidad_rapida/FASTQ/
+qsub -cwd -l h=compute-0-9 -t 1-20 /share/rdata2/dani_k/consanguinidad_rapida/FASTQ/bwa_mem_align_reads.sh
+
+```
