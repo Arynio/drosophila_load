@@ -7622,4 +7622,3 @@ SFS_relative_data_lines_ggplot
 ggsave(paste0("lines_average_",type,"_proportion_monomorphic_SFS.pdf"), width=12, height=20, units="cm", device="pdf", path=wd_path)
 
 ```
-
