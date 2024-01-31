@@ -529,10 +529,190 @@ scp ramon.pouso@rua2.uvigo.es://share/rdata/ramon.pouso/bootstrap/derived_allele
 ```
 
 #7. Plot counts.
-##Derived count ratios:
-###Relative to 4fold:
-####Relative to Pb:
-#####Gen0-140 pools Pb and line averages (combined version):
+##Derived count ratios (relative to 4fold and Pb-000):
+###Sites in Pb-000:
+####Double ratio:
+```{r}
+
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(scales)
+
+type <- "autosomes" #autosomes #Xchr #whole-genome
+
+wd_path <- ("/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/bootstrap/sites_in_Pb000/")
+#codes_dictionary <- read_tsv(paste0(wd_path,"pop_codes_dictionary.txt"),col_names=c("old","population"))
+
+
+pool_counts <- read_tsv(paste0(wd_path,"counts_pool_gen0-140_",type,"_average.Pb-000_4fold_rel.empirmean.txt")) %>% select(.,sample,generation,contains("_D")) %>% rename_at(vars("sample"),funs(gsub("sample","population",.))) %>% filter(generation!="gen5")
+#pool_counts <- left_join(pool_counts,codes_dictionary,by=c("sample"="old"))
+pool_counts$population = factor(pool_counts$population,levels=c("Pb","lines"))
+pool_counts$generation <- as.numeric(gsub("gen","",pool_counts$generation)) + 83
+pool_counts <- pool_counts %>% arrange(generation)
+pool_counts$generation = factor(pool_counts$generation)
+pool_counts <- pool_counts %>% arrange(population,generation)
+pool_counts <- pool_counts %>% setNames(gsub("_D","",names(.)))
+
+# pool_counts_4FR <- pool_counts %>% mutate(fourfold=fourfold_D/fourfold_D,tolerated=tolerated_D/fourfold_D,deleterious=deleterious_D/fourfold_D,LoF=LoF_D/fourfold_D) %>% select(!contains("_D")) %>% gather(ratio,value,-generation,-population,factor_key=T)
+# pool_counts_4FR
+pool_counts_tidy <- pool_counts %>% gather(ratio,value,-generation,-population,factor_key=T)
+
+pool_errors <- read_tsv(paste0(wd_path,"counts_pool_gen0-140_",type,"_average.Pb-000_4fold_rel.adequateerror.txt")) %>% select(.,sample,generation,contains("_D")) %>% rename_at(vars("sample"),funs(gsub("sample","population",.))) %>% filter(generation!="gen5")
+#pool_errors <- cbind(pool_errors,pool_counts$fourfold_D)
+#names(pool_errors)[names(pool_errors) == 'pool_counts$fourfold_D'] <- 'counts_fourfold_D'
+#pool_errors <- left_join(pool_errors,codes_dictionary,by=c("population"="old"))
+pool_errors$population = factor(pool_errors$population,levels=c("Pb","lines"))
+pool_errors$generation <- as.numeric(gsub("gen","",pool_errors$generation)) + 83
+pool_errors <- pool_errors %>% arrange(generation)
+pool_errors$generation = factor(pool_errors$generation)
+pool_errors <- pool_errors %>% arrange(population,generation)
+pool_errors <- pool_errors %>% setNames(gsub("_D","",names(.)))
+pool_errors[c(1),c(4:6)] <- NA
+
+# pool_errors_4FR <- pool_errors %>% mutate(fourfold=fourfold_D/counts_fourfold_D,tolerated=tolerated_D/counts_fourfold_D,deleterious=deleterious_D/counts_fourfold_D,LoF=LoF_D/counts_fourfold_D) %>% select(!contains("_D")) %>% gather(ratio,value,-generation,-population,factor_key=T)
+# pool_errors_4FR
+pool_errors_tidy <- pool_errors %>% gather(ratio,value,-generation,-population,factor_key=T)
+
+# combined_tidy <- left_join(pool_counts_4FR,pool_errors_4FR,by=c("population","generation","ratio"))
+# colnames(combined_tidy) <- c("population","generation","ratio","mean","error")
+combined_tidy_nonewmut <- left_join(pool_counts_tidy,pool_errors_tidy,by=c("population","generation","ratio"))
+colnames(combined_tidy_nonewmut) <- c("population","generation","ratio","mean","error")
+
+#Combined version (Pb):
+Pb_lines_relativised_pool_counts_copies_errors_4FR_ggplot <- ggplot(data=filter(combined_tidy_nonewmut,ratio!="fourfold",ratio!="tolerated"), aes(generation,mean)) +
+  #facet_wrap(feature ~ species,nrow=6,ncol=2,scales="free") +
+  facet_grid(. ~ ratio) +
+  geom_errorbar(aes(ymin=mean-error, ymax=mean+error, colour=generation, group=population), position=position_dodge(0.8),size=0.5,width=0.5) +
+  geom_point(aes(colour=generation,shape=population),size=2,position=position_dodge(0.8)) + 
+  ylab("Derived count relative to Pb-083 4-fold syn.") +
+  scale_y_continuous(breaks = seq(0.6, 1.0, by = 0.1)) +
+  scale_x_discrete(breaks = levels(combined_tidy_nonewmut$generation),limits = c(levels(combined_tidy_nonewmut$generation)[1],"skip",levels(combined_tidy_nonewmut$generation)[c(2:4)],c(rep("skip",3)),levels(combined_tidy_nonewmut$generation)[5])) +
+  scale_shape_manual(values=c(1,16)) +
+  ylim(0.6,1.2) +
+  ggtitle("Excluding new mutation") +
+  guides(colour="none") +
+  theme_bw() +
+  theme(text=element_text(size=9,face="bold"),
+        rect=element_rect(size=1),
+        axis.line=element_line(colour="black"),
+        axis.title=element_text(size=10,colour="black"),
+        axis.text=element_text(size=8,colour="black"),
+        axis.text.x=element_text(colour="black", angle=-90, vjust=0.5),
+        #axis.text.y=element_text(size=24,colour="black",margin=margin(t=0.5,unit="cm")),
+        #axis.title.y=element_text(size=30,margin=margin(r=0.5,unit="cm")),
+        panel.background=element_blank(),
+        panel.border=element_rect(colour="black"),
+        #panel.grid=element_blank(),
+        #panel.grid.major=element_line(colour="grey", linetype="dashed", size=0.4),
+        plot.margin=unit(c(0.5,0,0.5,0),"cm"),
+        #plot.title=element_text(size=36, face="bold", margin=margin(b=0.5, unit="cm")),
+        legend.background=element_rect(linetype="solid", colour="black", size=.5),
+        #legend.justification=c(0,0),
+        legend.key=element_rect(colour="white"),
+        #legend.key.size=unit(1.3,"cm"),
+        #legend.position="none",
+        legend.title=element_blank()
+  )
+Pb_lines_relativised_pool_counts_copies_errors_4FR_ggplot
+#ggsave(paste0("Pb_lines_relativised_pool_counts_copies_adequateerrors_4FR_",type,".bootstrap.pdf"), width=12, height=9, units="cm", device="pdf", path=wd_path)
+
+
+#Paper versions:
+##Various colours:
+#Combined with the version without new mutation (obtained in the bootstrap.Rmd script):
+Pb_lines_nonewmut_relativised_pool_counts_copies_errors_4FR_ggplot <- ggplot(data=filter(combined_tidy_nonewmut,ratio!="fourfold",ratio!="tolerated"), aes(generation,mean)) +
+  #facet_wrap(feature ~ species,nrow=6,ncol=2,scales="free") +
+  facet_grid(. ~ ratio) +
+  geom_errorbar(aes(ymin=mean-error, ymax=mean+error, colour=generation, group=population), position=position_dodge(0.8),size=0.5,width=0.5) +
+  geom_point(aes(colour=generation,shape=population),size=2,position=position_dodge(0.8)) + 
+  #ggtitle("Proportion of reads at different NM") +
+  #ylab("Derived count relative to Pb-083 4-fold syn.") +
+  scale_y_continuous(breaks = seq(0.6, 1.0, by = 0.1)) +
+  scale_x_discrete(breaks = levels(combined_tidy_nonewmut$generation),limits = c(levels(combined_tidy_nonewmut$generation)[1],"skip",levels(combined_tidy_nonewmut$generation)[c(2:4)],c(rep("skip",3)),levels(combined_tidy_nonewmut$generation)[5])) +
+  scale_shape_manual(values=c(1,16)) +
+  ylim(0.6,1.2) +
+  ggtitle("Excluding new mutation") +
+  guides(colour="none") +
+  theme_bw() +
+  theme(text=element_text(size=9,face="bold"),
+        rect=element_rect(size=1),
+        axis.line=element_line(colour="black"),
+        #axis.title=element_text(size=10,colour="black"),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text=element_text(size=8,colour="black"),
+        axis.text.x=element_text(colour="black", angle=-90, vjust=0.5),
+        axis.text.y=element_text(),
+        #axis.text.y=element_text(size=24,colour="black",margin=margin(t=0.5,unit="cm")),
+        #axis.title.y=element_text(size=30,margin=margin(r=0.5,unit="cm")),
+        panel.background=element_blank(),
+        panel.border=element_rect(colour="black"),
+        #panel.grid=element_blank(),
+        #panel.grid.major=element_line(colour="grey", linetype="dashed", size=0.4),
+        plot.margin=unit(c(0.5,0,0.5,0),"cm"),
+        plot.title=element_text(hjust=0.5),
+        #plot.title=element_text(size=36, face="bold", margin=margin(b=0.5, unit="cm")),
+        legend.background=element_rect(linetype="solid", colour="black", size=.5),
+        #legend.justification=c(0,0),
+        legend.key=element_rect(colour="white"),
+        #legend.key.size=unit(1.3,"cm"),
+        legend.position="none",
+        legend.title=element_blank()
+  )
+Pb_lines_nonewmut_relativised_pool_counts_copies_errors_4FR_ggplot
+
+##Two colours:
+combined_tidy_nonewmut_bis <- combined_tidy_nonewmut
+combined_tidy_nonewmut_bis$generation <- as.numeric(as.character(combined_tidy_nonewmut_bis$generation))
+combined_tidy_nonewmut_bis$ratio <- factor(combined_tidy_nonewmut_bis$ratio, levels = c("fourfold", "tolerated", "deleterious", "LoF"), labels = c("fourfold", "m. tolerated", "m. deleterious", "LoF"))
+#Combined with the version without new mutation (obtained in the bootstrap.Rmd script):
+Pb_lines_nonewmut_relativised_pool_counts_copies_errors_4FR_ggplot_bis <- ggplot(data=filter(combined_tidy_nonewmut_bis,ratio!="fourfold",ratio!="m. tolerated"), aes(generation,mean)) +
+  #facet_wrap(feature ~ species,nrow=6,ncol=2,scales="free") +
+  facet_grid(. ~ ratio) +
+  geom_errorbar(aes(ymin=mean-error, ymax=mean+error, group=population), position=position_dodge(6),linewidth=0.5,width=0.5) +
+  geom_point(aes(colour=population,shape=population),size=2,position=position_dodge(6)) + 
+  #ggtitle("Proportion of reads at different NM") +
+  ylab("Derived count relative to Pb-083 4-fold syn.") +
+  scale_y_continuous(breaks = seq(0.6, 1.0, by = 0.1)) +
+  scale_x_continuous(breaks = c(83,103,113,123,223), limits = c(81,225)) +
+  #scale_x_discrete(breaks = levels(combined_tidy_nonewmut$generation),limits = c(levels(combined_tidy_nonewmut$generation)[1],"skip",levels(combined_tidy_nonewmut$generation)[c(2:4)],c(rep("skip",3)),levels(combined_tidy_nonewmut$generation)[5])) +
+  scale_shape_manual(values=c(16,18)) +
+  ylim(0.6,1.2) +
+  ggtitle("Excluding new mutation") +
+  #guides(colour="none") +
+  theme_bw() +
+  theme(text=element_text(size=9,face="bold"),
+        rect=element_rect(size=1),
+        axis.line=element_line(colour="black"),
+        #axis.title=element_text(size=10,colour="black"),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text=element_text(size=8,colour="black"),
+        axis.text.x=element_text(colour="black", angle=-90, vjust=0.5),
+        axis.text.y=element_text(),
+        #axis.text.y=element_text(size=24,colour="black",margin=margin(t=0.5,unit="cm")),
+        #axis.title.y=element_text(size=30,margin=margin(r=0.5,unit="cm")),
+        panel.background=element_blank(),
+        panel.border=element_rect(colour="black"),
+        panel.grid=element_blank(),
+        #panel.grid.major=element_line(colour="grey", linetype="dashed", size=0.4),
+        plot.margin=unit(c(0.5,0,0.5,0),"cm"),
+        plot.title=element_text(hjust=0.5),
+        #plot.title=element_text(size=36, face="bold", margin=margin(b=0.5, unit="cm")),
+        legend.background=element_rect(linetype="solid", colour="black", size=.5),
+        #legend.justification=c(0,0),
+        legend.key=element_rect(colour="white"),
+        #legend.key.size=unit(1.3,"cm"),
+        legend.position="none",
+        legend.title=element_blank()
+  )
+Pb_lines_nonewmut_relativised_pool_counts_copies_errors_4FR_ggplot_bis
+
+```
+
+####OLD: Gen0-140 pools Pb and line averages (combined version):
 ```{r}
 
 library(readr)
@@ -616,7 +796,7 @@ ggsave(paste0("Pb_lines_relativised_pool_counts_copies_errors_4FR_",type,".boots
 
 ```
 
-#####Gen0-140 pools Pb booterror and line averages empirerror (combined version):
+####OLD: Gen0-140 pools Pb booterror and line averages empirerror (combined version):
 ```{r}
 
 library(readr)
