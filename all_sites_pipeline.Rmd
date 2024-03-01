@@ -685,7 +685,7 @@ module load gcc/7.2.0
 module add gcc/7.2.0
 cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/
 
-#Keep only SNPs that were successfully filtered (this was done in revious steps), and for which the ancestral inferrence is available and highly confident.
+#Keep only SNPs that were successfully filtered (this was done in previous steps), and for which the ancestral inference is available and highly confident.
 bedtools intersect -a crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.vcf -b /share/rdata/ramon.pouso/POOLS/all_gens_0_140/est-sfs/output_pipeline/gen0-140_all_sites.orthologs.confident.DP_EM_filtered.sum_gen0_gen20_gen30_allele_counts.extrapolated_to_180.ancestral_vs_derived_complete.confident.rate6.pval.bed -header > crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.vcf
 
 #Launch fill-aa.sh (locally, not with qsub due to problems with PERL5LIB) in order to fill the VCF with the ancestral alleles:
@@ -2432,7 +2432,7 @@ cat <(grep "^#" $VCF) <(sort -k1,1 -k2,2n ${VCF/vcf/custom_unsorted.vcf}) > ${VC
 ```
 
 #12. Split the VCFs at the pool level:
-##Exclude non-variants:
+##Exclude AF=0:
 ###All sites:
 ```{R, engine='bash'}
 
@@ -2493,7 +2493,7 @@ for p in ${POOLS[@]}
 
 ```
 
-##Include non-variants:
+##Include AF=0:
 ```{R, engine='bash'}
 
 mkdir -p /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/
@@ -2615,7 +2615,7 @@ depth_distr_ggplot
 
 #13. Retrieve counts.
 ##Total observed counts.
-###Exclude non-variants VCFs:
+###Exclude AF=0 VCFs:
 ####Retrieve derived counts per category:
 #####All sites:
 ```{R, engine='bash'}
@@ -2807,7 +2807,7 @@ scp ramon.pouso@rua2.uvigo.es://share/rdata/ramon.pouso/POOLS/all_gens_0_140/cou
 
 ```
 
-###Include non-variants VCFs:
+###Include AF=0 VCFs:
 ####Retrieve ancestral counts per category:
 ```{R, engine='bash'}
 
