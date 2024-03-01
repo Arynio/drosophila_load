@@ -521,7 +521,7 @@ elif [ $TYPE == "INDIVIDUOS" ] && [ $SUBTYPE == "Xchr" ]
 fi
 
 #One entry:
-grep -v '^#' $VCF | grep 'nonsynonymous_SNV' | grep 'SIFT' | awk '!($5 ~ ",")' | awk -F";Gene\\\\.refGene=|;GeneDetail\\\\.refGene=|;AAChange\\\\.refGene=|;ALLELE_END|;SIFTINFO=|\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$9,$11,$13)}' | awk 'BEGIN{FS=OFS="\t"} {gsub(":","_", $4);gsub("\\(","_");gsub("\\)","_");print}' | awk -F"\t|:" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$10)}' | grep -v "," | less -S  > ${VCF/.vcf/.clean.txt}
+grep -v '^#' $VCF | grep 'nonsynonymous_SNV' | grep 'SIFT' | awk '!($5 ~ ",")' | awk -F";Gene\\\\.refGene=|;GeneDetail\\\\.refGene=|;AAChange\\\\.refGene=|;ALLELE_END|;SIFTINFO=|\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$9,$11,$13)}' | awk 'BEGIN{FS=OFS="\t"} {gsub(":","_", $4);gsub("\\(","_");gsub("\\)","_");print}' | awk -F"\t|:" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$10)}' | grep -v "," > ${VCF/.vcf/.clean.txt}
 #Multiple entries:
 grep -v '^#' $VCF | grep 'nonsynonymous_SNV' | grep 'SIFT' | awk '!($5 ~ ",")' | awk -F";Gene\\\\.refGene=|;GeneDetail\\\\.refGene=|;AAChange\\\\.refGene=|;ALLELE_END|;SIFTINFO=|\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$9,$11,$13)}' | awk 'BEGIN{FS=OFS="\t"} {gsub(":","_", $4);gsub("\\(","_");gsub("\\)","_");print}' | awk -F"\t|:" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$10)}' | grep "," | sed 's/,/\t/g' | awk '{for(i=6;i<=NF;i++){if($i ~ $5){printf ("%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$i)}}}' >> ${VCF/.vcf/.clean.txt}
 
