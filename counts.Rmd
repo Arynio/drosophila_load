@@ -1238,7 +1238,7 @@ for i in "${INDLIST[@]}"
 ```
 
 ###Pools:
-####Exclude non-variants VCFs:
+####Exclude AF=0 VCFs:
 #####All sites:
 ######pool_counts_all.sh:
 ```{R, engine='bash'}
@@ -1479,7 +1479,7 @@ for pool in "${POOL_LIST[@]}"
   
 ```
 
-####Keep non-variants VCFs:
+####Keep AF=0 VCFs:
 #####Sites with 10 or more reads:
 ######Build SFS per category:
 ```{R, engine='bash'}
@@ -1677,7 +1677,7 @@ paste sites_missing_from_gen140_lost_in_gen140.autosomes_summary.txt sites_missi
 ```
 
 ###Pools:
-####Keep non-variants VCFs:
+####Keep AF=0 VCFs:
 #####Sites with 10 or more reads:
 ######Calculate proportion of derived reads:
 ```{R, engine='bash'}
@@ -1964,7 +1964,7 @@ paste sites_missing_from_gen140_lost_in_gen140.autosomes_summary.txt sites_missi
 ```
 
 ###Pools:
-####Exclude non-variants VCFs:
+####Exclude AF=0 VCFs:
 #####Count variants and derived copies, gen 0-140 VCF:
 ######All sites in the dataset:
 ```{R, engine='bash'}
@@ -2211,7 +2211,7 @@ for pool in "${POOL_LIST[@]}"
 
 ```
 
-####Keep non-variants VCFs:
+####Keep AF=0 VCFs:
 #####Sites with 10 or more reads:
 ######Calculate proportion of derived reads:
 ```{R, engine='bash'}
