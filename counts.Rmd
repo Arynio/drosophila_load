@@ -6991,7 +6991,7 @@ library(scales)
 
 type <- "all" #all #autosomes #Xchr
 
-wd_path <- ("/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/gen0-140/")
+wd_path <- ("/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/sites_in_Pb000/gen0-140/")
 SFS_raw_data_combined <- read_tsv(paste0(wd_path,"SFS_pool_gen0-140_combined_",type,"_summary.txt"))
 
 SFS_raw_data_combined <- SFS_raw_data_combined %>% rowwise %>% mutate(total= sum(c_across(where(is.numeric)))) #row-wise sum of all numeric columns (the "af" columns; "gen" is excluded if its converted to a factor first.
