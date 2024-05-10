@@ -1,0 +1,467 @@
+---
+title: "background_selection_analysis"
+output: html_document
+date: "2024-03-25"
+---
+
+#0. Prepare ped and map files.
+##Populations in the experiment by Irene:
+```{bash}
+
+cd /DATA/rdata2/DROSOHILA_FICHEROS/
+#Armando put them in this folder.
+
+#His e-mail:
+#Te he dejado en DATA/rdata2/DROSOHILA_FICHEROS los map y ped que se usaron en el trabajo de Novo et al.:
+ 
+#The total number of SNPs available for analysis were 891,737, 942,323, 882,861 and 894,727 for the autosomal chromosomes and 143,742, 98,450, 108,026 and 85,767 for the X-chromosome, in the four samples, respectively.
+ 
+#Los de BOT (que es A8) se usan para filtrar a los demás. Eso tienes que hacerlo también con las líneas pequeñas antes de dármelas. Se haría así, por ejemplo para la PB:
+ 
+awk '{print $1, $4}' A8.map | sort > array_snp_A8_sorted.txt
+awk '{print $1, $4}' PB17-1.map | sort > array_snp_PB17-1_sorted.txt
+comm -12 array_snp_A8_sorted.txt array_snp_PB17-1_sorted.txt > intersecting_snps_PB17-1_A8.txt
+awk '{print $1, $2, $2, NR}' intersecting_snps_PB17-1_A8.txt > intersecting_ranges_PB17-1_A8.txt
+./plink1.9 --file PB17-1 --extract range intersecting_ranges_PB17-2_A8.txt --make-bed --recode --out PB17-1-A8
+
+#However, the files in BOT_EXPAN are not filtered by A8.
+
+#Copy the files to my folder:
+mkdir /share/rdata2/dani_k/seleccion_fondo/plink
+scp -pr . /share/rdata2/dani_k/seleccion_fondo/plink/
+
+```
+
+##Lines from the slow inbreeding experiment:
+##Generate ped and map for each vcf.
+```{bash}
+
+#I already generated ped and map files previously for GONE, but the code has been lost. To generate them, I used the following vcf files for each $pop:
+
+vcf=/share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/linea_"${pop}"/dani/L"${pop}"-Allcomb_autohap_genotyped_snps_masked_hf_pass.plink.vcf #which is the same as L"${pop}"-Allcomb_autohap_genotyped_snps_masked_hf_pass.vcf but with chromosome names changed as follows: 2L = 1; 2R = 2; 3L = 3; 3R = 4.
+
+#Next, I used vcftools to obtain the ped and map files:
+module load vcftools/0.1.17
+vcftools --vcf $vcf --plink --out ${vcf/.plink.vcf/} --chrom-map /share/rdata2/dani_k/proyecto_rescate/counts/roh_analysis/dros_chrom_map.txt
+
+#And same for the Xchr, which has a different vcf file: vcf=/share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/linea_"${pop}"/dani/L"${pop}"-Allcomb_xhap_genotyped_snps_masked_hf_pass.plink.vcf
+
+```
+
+##Filter the autosomal ones by A8, and moved them to the correct folders.
+```{bash}
+
+#First re-sort the A8 map file:
+cd /share/rdata2/dani_k/seleccion_fondo/plink/BOT
+awk '{print $1, $4}' A8.map | sort > array_snp_A8_sorted.txt
+
+cd /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/
+module load bcftools/1.9
+module load gcc/7.2.0
+module add gcc/7.2.0
+
+LINES=$(bcftools query -l Alllinesonly-Allcomb_autohap_genotyped_snps_masked_hf_pass.vcf | cut -c 2-3 | sort -u)
+for pop in ${LINES[@]}
+  do
+  echo "${pop}"
+  mkdir -p /share/rdata2/dani_k/seleccion_fondo/plink/L"${pop}"
+  cd /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/linea_"${pop}"/dani/
+  awk '{print $1, $4}' L"${pop}"-Allcomb_autohap_genotyped_snps_masked_hf_pass.map | sort > array_snp_L"${pop}"_sorted.txt
+  comm -12 /share/rdata2/dani_k/seleccion_fondo/plink/BOT/array_snp_A8_sorted.txt array_snp_L"${pop}"_sorted.txt > intersecting_snps_L"${pop}"_A8.txt
+  awk '{print $1, $2, $2, NR}' intersecting_snps_L"${pop}"_A8.txt > intersecting_ranges_L"${pop}"_A8.txt
+  rm /share/rdata2/dani_k/seleccion_fondo/plink/L"${pop}"/L"${pop}"_A8*
+  /share/rdata2/dani_k/seleccion_fondo/plink/plink --file L"${pop}"-Allcomb_autohap_genotyped_snps_masked_hf_pass --extract range intersecting_ranges_L"${pop}"_A8.txt --make-bed --recode --out /share/rdata2/dani_k/seleccion_fondo/plink/L"${pop}"/L"${pop}"_A8
+  bedtools intersect -a <(awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\n", $1,$4-1,$4,$2,$3)}' /share/rdata2/dani_k/seleccion_fondo/plink/L"${pop}"/L"${pop}"_A8.map) -b <(awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\n", $1,$4-1,$4,$2,$3)}' /share/rdata2/dani_k/seleccion_fondo/plink/genetic_map/Pb-B-ALL_merged_snps_final_autosomic.map) -wa -wb | awk -F"\t" '{printf ("%s\t%s\t%s\t%s\n", $1,$4,$10,$2)}' > /share/rdata2/dani_k/seleccion_fondo/plink/L"${pop}"/L"${pop}"_A8.map.bis
+  mv /share/rdata2/dani_k/seleccion_fondo/plink/L"${pop}"/L"${pop}"_A8.map.bis /share/rdata2/dani_k/seleccion_fondo/plink/L"${pop}"/L"${pop}"_A8.map
+  done
+
+```
+
+##Copy the Xchr ones to the correct folders, and add the map distances.
+```{bash}
+
+cd /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/
+module load bcftools/1.9
+module load gcc/7.2.0
+module add gcc/7.2.0
+
+awk '{print $1, $4}' /share/rdata2/dani_k/seleccion_fondo/plink/genetic_map/Pb-B-ALL_merged_snps_final_X.map | sort > /share/rdata2/dani_k/seleccion_fondo/plink/genetic_map/x_array_snp_Pb-B-ALL_sorted.txt
+LINES=$(bcftools query -l Alllinesonly-Allcomb_xhap_genotyped_snps_masked_hf_pass.vcf | cut -c 2-3 | sort -u)
+for pop in ${LINES[@]}
+  do
+  echo "${pop}"
+  cd /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/linea_"${pop}"/dani/
+  grep -v '#' L"${pop}"-Allcomb_xhap_genotyped_snps_masked_hf_pass.map | sed 's/X/5/g' > L"${pop}"-Allcomb_xhap_genotyped_snps_masked_hf_pass.corrected.map
+  cut -f-6,9- L"${pop}"-Allcomb_xhap_genotyped_snps_masked_hf_pass.ped > L"${pop}"-Allcomb_xhap_genotyped_snps_masked_hf_pass.corrected.ped
+  awk '{print $1, $4}' L"${pop}"-Allcomb_xhap_genotyped_snps_masked_hf_pass.corrected.map | sort > x_array_snp_L"${pop}"_sorted.txt
+  comm -12 /share/rdata2/dani_k/seleccion_fondo/plink/genetic_map/x_array_snp_Pb-B-ALL_sorted.txt x_array_snp_L"${pop}"_sorted.txt > x_intersecting_snps_L"${pop}"_Pb-B.txt
+  awk '{print $1, $2, $2, NR}' x_intersecting_snps_L"${pop}"_Pb-B.txt > x_intersecting_ranges_L"${pop}"_Pb-B.txt
+  rm /share/rdata2/dani_k/seleccion_fondo/plink/L"${pop}"/L"${pop}"_Pb-B*
+  /share/rdata2/dani_k/seleccion_fondo/plink/plink --file L"${pop}"-Allcomb_xhap_genotyped_snps_masked_hf_pass.corrected --extract range x_intersecting_ranges_L"${pop}"_Pb-B.txt --make-bed --recode --out /share/rdata2/dani_k/seleccion_fondo/plink/L"${pop}"/L"${pop}"_X_Pb-B
+  bedtools intersect -a <(awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\n", $1,$4-1,$4,$2,$3)}' L"${pop}"-Allcomb_xhap_genotyped_snps_masked_hf_pass.corrected.map) -b <(awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\n", $1,$4-1,$4,$2,$3)}' /share/rdata2/dani_k/seleccion_fondo/plink/genetic_map/Pb-B-ALL_merged_snps_final_X.map) -wa -wb | awk -F"\t" '{printf ("%s\t%s\t%s\t%s\n", $1,$4,$10,$2)}' > /share/rdata2/dani_k/seleccion_fondo/plink/L"${pop}"/L"${pop}"_X_Pb-B.map.bis
+  mv /share/rdata2/dani_k/seleccion_fondo/plink/L"${pop}"/L"${pop}"_X_Pb-B.map.bis /share/rdata2/dani_k/seleccion_fondo/plink/L"${pop}"/L"${pop}"_X_Pb-B.map
+  done
+
+```
+
+#1. Process raw reads:
+```{R, engine='bash'}
+
+#This was already performed by Irene as part of her thesis.
+
+```
+
+#2. Process aligned reads:
+```{R, engine='bash'}
+
+#This was already performed by Irene as part of her thesis.
+
+```
+
+#3. Perform the GATK calling:
+##Generate gVCFs:
+```{R, engine='bash'}
+
+#All gVCFs have already been generated.
+#gVCF files from the Irene experiment have been copied to:
+/share/rdata2/dani_k/seleccion_fondo/variants/*_hap.g.vcf
+#gVCF files from lines from the slow inbreeding experiment are in:
+/share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/linea_*/-Allcomb_hap.g.vcf
+
+```
+
+##Combine gVCFs:
+###Autosomes:
+####combine_gvcf_autosomes.sh:
+```{R, engine='bash'}
+
+cd /share/rdata2/dani_k/seleccion_fondo/variants
+
+module load java/jre/1.8.0_73
+module load GATK/4.1.4
+gatk CombineGVCFs -R /share/rdata/ramon.pouso/reference/indexed_reference/dmel-all-chromosome-r6.14.fasta \
+$(for s in $(ls /share/rdata2/dani_k/seleccion_fondo/variants/*_hap.g.vcf); do echo "--variant ${s}"; done) \
+$(for s in $(ls /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/linea_*/*-Allcomb_hap.g.vcf); do echo "--variant ${s}"; done) \
+-O BS_allpops_autosomes.g.vcf
+
+#Save this code as: /share/rdata2/dani_k/seleccion_fondo/variants/combine_gvcf_autosomes.sh
+
+```
+
+####Send array-job:
+```{R, engine='bash'}
+
+mkdir -p /share/rdata2/dani_k/seleccion_fondo/variants/
+cd /share/rdata2/dani_k/seleccion_fondo/variants/
+
+qsub -cwd -l h=compute-0-9 /share/rdata2/dani_k/seleccion_fondo/variants/combine_gvcf_autosomes.sh
+
+```
+
+###Xchr:
+####combine_gvcf_Xchr.sh:
+```{R, engine='bash'}
+
+cd /share/rdata2/dani_k/seleccion_fondo/variants
+
+module load java/jre/1.8.0_73
+module load GATK/4.1.4
+gatk CombineGVCFs -R /share/rdata/ramon.pouso/reference/indexed_reference/dmel-all-chromosome-r6.14.fasta \
+$(for s in $(ls /share/rdata2/dani_k/seleccion_fondo/variants/*_xhap.g.vcf); do echo "--variant ${s}"; done) \
+$(for s in $(ls /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/linea_*/*-Allcomb_xhap.g.vcf); do echo "--variant ${s}"; done) \
+-L /share/rdata/ramon.pouso/INDIVIDUOS/gen40/regions_of_interest_x.bed \
+-O BS_allpops_Xchr.g.vcf
+
+#Save this code as: /share/rdata2/dani_k/seleccion_fondo/variants/combine_gvcf_Xchr.sh
+
+```
+
+####Send array-job:
+```{R, engine='bash'}
+
+mkdir -p /share/rdata2/dani_k/seleccion_fondo/variants/
+cd /share/rdata2/dani_k/seleccion_fondo/variants/
+
+qsub -cwd -l h=compute-0-9 /share/rdata2/dani_k/seleccion_fondo/variants/combine_gvcf_Xchr.sh
+
+```
+
+##Genotype gVCF:
+###Autosomes:
+####genotype_gvcf_autosomes.sh:
+```{R, engine='bash'}
+
+#Add genotype information to all variants.
+cd /share/rdata2/dani_k/seleccion_fondo/variants
+
+module load java/jre/1.8.0_73
+module load GATK/4.1.4
+gatk GenotypeGVCFs -V BS_allpops_autosomes.g.vcf -O BS_allpops_autosomes.vcf -R /share/rdata/ramon.pouso/reference/indexed_reference/dmel-all-chromosome-r6.14.fasta -L /share/rdata/ramon.pouso/INDIVIDUOS/gen40/regions_of_interest_autosomic.bed
+
+#Save this code as: /share/rdata2/dani_k/seleccion_fondo/variants/genotype_gvcf_autosomes.sh
+
+```
+
+####Send array-job:
+```{R, engine='bash'}
+
+cd /share/rdata2/dani_k/seleccion_fondo/variants/
+
+qsub -cwd -l h=compute-0-9 /share/rdata2/dani_k/seleccion_fondo/variants/genotype_gvcf_autosomes.sh
+
+```
+
+###Xchr:
+####genotype_gvcf_Xchr.sh:
+```{R, engine='bash'}
+
+#Add genotype information to all variants.
+cd /share/rdata2/dani_k/seleccion_fondo/variants
+
+module load java/jre/1.8.0_73
+module load GATK/4.1.4
+gatk GenotypeGVCFs -V BS_allpops_Xchr.g.vcf -O BS_allpops_Xchr.vcf -R /share/rdata/ramon.pouso/reference/indexed_reference/dmel-all-chromosome-r6.14.fasta
+
+#Save this code as: /share/rdata2/dani_k/seleccion_fondo/variants/genotype_gvcf_Xchr.sh
+
+```
+
+####Send array-job:
+```{R, engine='bash'}
+
+cd /share/rdata2/dani_k/seleccion_fondo/variants/
+
+qsub -cwd -l h=compute-0-9 /share/rdata2/dani_k/seleccion_fondo/variants/genotype_gvcf_Xchr.sh
+
+```
+
+#4. Process the VCF:
+##Filter VCF:
+###filter_vcf_common_filters.sh
+```{R, engine='bash'}
+
+#Apply filters to the VCF:
+module load bcftools/1.9
+module load gcc/7.2.0
+module add gcc/7.2.0
+module load java/jre/1.8.0_73
+module load GATK/4.1.4
+export PATH=$PATH:/share/apps/bedtools2/bin:/share/apps/est-sfs-release-2.03/:/share/apps/BAMTOOLS/bin:/share/apps/bedtools2/bin
+
+VCF=$1
+
+
+#Mask highly repeated, low-information areas.
+echo "removing repetitive regions"
+bedtools subtract -a $VCF -b /share/rdata/ramon.pouso/reference/indexed_reference/dmel-r6.14_mask.bed -header > ${VCF/.vcf/.masked.vcf} #Note that the bed contains a total of 22769366 sites across chr 2L, 2R, 3L, 3R and X.
+
+#Remove multialelic SNPs and indels, monomorphic SNPs, and SNPs in the close proximity of indels (10 bp).
+echo "removing INDELs, monomorphic and multiallelic SNPs, plus SNPs close to INDELs"
+bcftools filter -e 'AC==0 || AC==AN' --SnpGap 10 ${VCF/.vcf/.masked.vcf} | bcftools view -m2 -M2 -v snps -O v -o ${VCF/.vcf/.masked.bcf_filtered.vcf}
+
+#Remove low- and high-depth SNPs.
+DP_AVG=$(grep -v '^#' ${VCF/.vcf/.masked.bcf_filtered.vcf} | cut -f8 | awk -F";DP=|;ExcessHet" '{printf ("%s\n",$2)}' | awk '{sum+=$1}END{print sum/NR}')
+DP_SD=$(grep -v '^#' ${VCF/.vcf/.masked.bcf_filtered.vcf} | cut -f8 | awk -F";DP=|;ExcessHet" '{printf ("%s\n",$2)}' | awk '{sum+=$1; sumsq+=$1*$1}END{print sqrt(sumsq/NR - (sum/NR)**2)}')
+DP_AVG_PLUS_SD=$(bc -l <<< "$DP_AVG+3*$DP_SD")
+echo "removing high (> $DP_AVG_PLUS_SD) depth SNPs"
+bcftools filter -e "INFO/DP>=$DP_AVG_PLUS_SD" ${VCF/.vcf/.masked.bcf_filtered.vcf} -O v -o ${VCF/.vcf/.masked.bcf_filtered.DP_filtered.vcf}
+
+#Filter variants using GATK’s recommended presets.
+echo "applying GATK's recommended hard-filters"
+gatk VariantFiltration -R /share/rdata/ramon.pouso/reference/indexed_reference/dmel-all-chromosome-r6.14.fasta -V ${VCF/.vcf/.masked.bcf_filtered.DP_filtered.vcf} \
+-filter "QD < 2.0" --filter-name "QD2" \
+-filter "FS > 60.0" --filter-name "FS60" \
+-filter "SOR > 3.0" --filter-name "SOR3" \
+-filter "MQRankSum < -12.5" --filter-name "MQRankSum-12.5" \
+-filter "ReadPosRankSum < -8.0" --filter-name "ReadPosRankSum-8" \
+-filter "QUAL < 30.0" --filter-name "QUAL30" \
+-filter "MQ < 30.0" --filter-name "MQ30" \
+-O ${VCF/.vcf/.masked.bcf_filtered.DP_filtered.tagged.vcf}
+
+#Extract variants that have passed the filter.
+grep -e '^#' ${VCF/.vcf/.masked.bcf_filtered.DP_filtered.tagged.vcf} > ${VCF/.vcf/.masked.bcf_filtered.DP_filtered.hard_filtered.vcf}
+grep -ve '^#' ${VCF/.vcf/.masked.bcf_filtered.DP_filtered.tagged.vcf} | grep 'PASS' >> ${VCF/.vcf/.masked.bcf_filtered.DP_filtered.hard_filtered.vcf}
+
+#Save this code as: /share/rdata2/dani_k/seleccion_fondo/variants/filter_vcf_common_filters.sh
+
+``` 
+
+###Send array-job:
+```{R, engine='bash'}
+
+cd /share/rdata2/dani_k/seleccion_fondo/variants/
+VCF="BS_allpops_Xchr.vcf" #BS_allpops_autosomes.vcf #BS_allpops_Xchr.vcf
+
+qsub -cwd -l h=compute-0-4 /share/rdata2/dani_k/seleccion_fondo/variants/filter_vcf_common_filters.sh $VCF
+
+```
+
+###Check files:
+```{R, engine='bash'}
+
+cd /share/rdata2/dani_k/seleccion_fondo/variants/
+VCF="BS_allpops_autosomes.vcf" #BS_allpops_autosomes.vcf #BS_allpops_Xchr.vcf
+
+#Autosomes vs Xchr:
+grep -v '^#' $VCF | wc -l #2376405 #367019
+grep -v '^#' ${VCF/.vcf/.masked.vcf} | wc -l #2115445 #305021
+grep -v '^#' ${VCF/.vcf/.masked.bcf_filtered.vcf} | wc -l #1392090 #191971
+grep -v '^#' ${VCF/.vcf/.masked.bcf_filtered.DP_filtered.vcf} | wc -l #1385662 #191033
+grep -v '^#' ${VCF/.vcf/.masked.bcf_filtered.DP_filtered.hard_filtered.vcf} | wc -l #1368950 #175616
+
+```
+
+#5. Carry out general annotation with ANNOVAR:
+##Build the drosophila database.
+###Good complete version (changes codes in the UCSC database).
+```{R, engine='bash'}
+
+#This chunk doesn't need to be repeated; do not run it unless the files were removed.
+
+cd annovar_database/reference_dm6/
+
+#Note: any code involving annotate_variation.pl won't work because apparently the server blocks its attempts to download files from an external website, so I had to replace it with alternative code.
+
+#The following commented section doesn't need to be repeated:
+<!-- #First download, uncompress and rename the gene database: -->
+<!-- wget https://hgdownload.cse.ucsc.edu/goldenPath/dm6/database/refGene.txt.gz -->
+<!-- gunzip -c refGene.txt.gz > dm6_refGene.txt -->
+
+<!-- #Next, download the chromosome names equivalence file (aka "alias" or "dictionary"), which we'll need to edit the gene database so that the scaffolds use the same nomenclature as our files: -->
+<!-- wget https://hgdownload.cse.ucsc.edu/goldenPath/dm6/bigZips/dm6.chromAlias.txt -->
+<!-- nano dm6.chromAlias.txt #edit it to add "mitochondrion_genome" in the fourth column for the row that starts with chrM. -->
+
+<!-- #Then we can replace all database names with the UCSC names, which are used in our VCFs and fasta files. -->
+<!-- DB_CODES=$(cut -f3 dm6_refGene.txt | sort | uniq) -->
+<!-- for old_code in ${DB_CODES[@]} -->
+<!--   do -->
+<!--   new_code=$(awk -v old=$old_code '$1==old' /share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/ancestral_dm6/dm6.chromAlias.txt | cut -f4) -->
+<!--   echo "${old_code} -> ${new_code}" -->
+<!--   sed -i -e "s/\<$old_code\>/$new_code/g" dm6_refGene.txt -->
+<!--   done -->
+
+<!-- diff <(cut -f-2,4- dm6_refGene.txt) <(cut -f-2,4- refGene.txt) #checks whether the previous loop modified any other field. Since no lines are returned, both files are identical (outside of the 3rd column, which was changed). -->
+
+#The following has to be repeated, since the new polarisation means that the ancestral genome has changed:
+#Copy the ancestral fasta (obtained in the polarisation.Rmd script) to the aproppriate folder:
+scp -p /share/rdata/ramon.pouso/reference/indexed_reference/dmel-all-chromosome-r6.14.fasta dm6_seq/dm6_dmel-all-chromosome-r6.14.fasta
+
+#Next, use annovar to build the gene database:
+module load annovar/4.19
+retrieve_seq_from_fasta.pl dm6_refGene.txt -seqfile dm6_seq/dm6_dmel-all-chromosome-r6.14.fasta -format refGene -outfile dm6_refGeneMrna.fa
+
+```
+
+###Good non-redundant version (changes codes in the UCSC database).
+```{R, engine='bash'}
+
+#This chunk doesn't need to be repeated; do not run it unless the files were removed.
+
+#This version is a clone of the good complete version from which we'll remove all isoforms except for the longest one. Hence this is the "non-redundant" or "main isoforms" version of the annovar database, which we'll use to simplify the subsequent PROVEAN annotation.
+
+#The following commented section doesn't need to be repeated:
+<!-- #First, download the .gtf gene database from the UCSC: -->
+<!-- cd /share/rdata/ramon.pouso/reference/indexed_reference/ -->
+<!-- wget https://hgdownload.soe.ucsc.edu/goldenPath/dm6/bigZips/genes/dm6.refGene.gtf.gz -->
+<!-- gunzip dm6.refGene.gtf.gz -->
+
+<!-- #Then extract the list of transcripts, calculate their size, and keep the largest one for each chromosome. -->
+<!-- awk -F"\t|gene_id |; transcript_id |;  gene_name " '($1 == "chr2L" || $1 == "chr2R" || $1 == "chr3L" || $1 == "chr3R" || $1 == "chr4" || $1 == "chrX") && $3=="transcript" {printf ("%s\t%s\t%s\t%s\n"),$1,$5-$4,$10,$11}' dm6.refGene.gtf | sed 's/"//g' | sort -k1,1 -k3,3 -k2,2nr | sort -k3,3 -u | sort -k1,1 -k3,3 > dm6nr.refGene.txt -->
+<!-- grep -Ff <(cut -f4 dm6nr.refGene.txt) dm6.refGene.gtf > dm6nr.refGene.gtf -->
+
+#Next, clone the previous database and rename it and some of its files to include the code "nr" (non-redundant):
+cd /share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/
+#scp -pr reference_dm6 nr_reference_dm6
+cd nr_reference_dm6
+mv dm6_seq dm6nr_seq
+mv dm6nr_seq/dm6_dmel-all-chromosome-r6.14.fasta dm6nr_seq/dm6nr_dmel-all-chromosome-r6.14.fa
+mv dm6.chromAlias.txt dm6nr.chromAlias.txt
+rm dm6_refGeneMrna.fa
+
+#Then subset the dm6 annovar database so that only main isoforms are kept, and remove the original database.
+grep -Ff <(cut -f4 /share/rdata/ramon.pouso/reference/indexed_reference/dm6nr.refGene.txt) dm6_refGene.txt > dm6nr_refGene.txt
+rm dm6_refGene.txt
+
+#Next, use annovar to build the gene database:
+module load annovar/4.19
+retrieve_seq_from_fasta.pl dm6nr_refGene.txt -seqfile dm6nr_seq/dm6nr_dmel-all-chromosome-r6.14.fa -format refGene -outfile dm6nr_refGeneMrna.fa
+
+```
+
+##Annotate the VCFs.
+###Non-redundant version.
+```{R, engine='bash'}
+
+module load annovar/4.19
+
+cd /share/rdata2/dani_k/seleccion_fondo/variants
+
+#Autosomes:
+FILE=BS_allpops_autosomes.masked.bcf_filtered.DP_filtered.hard_filtered.vcf
+table_annovar.pl $FILE /share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/nr_reference_dm6 -vcfinput --outfile ${FILE/.vcf/.nr_annovar} -buildver dm6nr --protocol refGene --operation g #1368950
+
+#X chromosome:
+FILE=BS_allpops_Xchr.masked.bcf_filtered.DP_filtered.hard_filtered.vcf
+table_annovar.pl $FILE /share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/nr_reference_dm6 -vcfinput --outfile ${FILE/.vcf/.nr_annovar} -buildver dm6nr --protocol refGene --operation g #175616
+
+```
+
+#6. Generate the two alternative databases:
+##A) Intergenic regions only:
+```{R, engine='bash'}
+
+cd /share/rdata2/dani_k/seleccion_fondo/variants
+VCF=BS_allpops_Xchr.masked.bcf_filtered.DP_filtered.hard_filtered.nr_annovar.dm6nr_multianno.vcf #BS_allpops_autosomes.masked.bcf_filtered.DP_filtered.hard_filtered.nr_annovar.dm6nr_multianno.vcf BS_allpops_Xchr.masked.bcf_filtered.DP_filtered.hard_filtered.nr_annovar.dm6nr_multianno.vcf
+
+grep '^#' $VCF > ${VCF/.vcf/.neutral_set.vcf}
+grep ";Func.refGene=intergenic;" $VCF >> ${VCF/.vcf/.neutral_set.vcf} #Autosomes: 276079; Xchr: 29611
+
+```
+
+##B) Curated dataset:
+###Generate bed with the exclusion tracks.
+```{R, engine='bash'}
+
+module load gcc/7.2.0
+module add gcc/7.2.0
+
+cd /share/rdata2/dani_k/seleccion_fondo/tracks
+
+#I downloaded from https://hgdownload.soe.ucsc.edu/goldenPath/dm6/database/ the following three tracks: phyloP124way.txt.gz, phyloP124way.txt.gz, and cpgIslandExtUnmasked.txt.gz (plus an alternative version for each of them, but the ones listed here are the ones that will be used).
+
+#PhyloP: remove all regions with an average score higher than 2 or lower than -2.
+zcat phyloP124way.txt.gz | awk -F"\t" '($13/$12 > 2) || ($13/$12 < -2) {gsub(/chr/,"",$2); printf ("%s\t%s\t%s\t%s\n"),$2,$3,$4,$13/$12}' | awk -F"\t" '($1=="2L") || ($1=="2R") || ($1=="3L") || ($1=="3R") || ($1=="X")' > phyloP_exclude_regions.bed #29583
+
+#PhastCons: remove all regions with a score (i.e. probability of being affected by negative selection) higher than 0.8.
+zcat phastCons124way.txt.gz | awk -F"\t" '($13/$12 > 0.8) {gsub(/chr/,"",$2); printf ("%s\t%s\t%s\t%s\n"),$2,$3,$4,$13/$12}' | awk -F"\t" '($1=="2L") || ($1=="2R") || ($1=="3L") || ($1=="3R") || ($1=="X")' > phastCons_exclude_regions.bed #4365
+
+#CpGIslands: remove all regions included in the UCSC files. They all have a %CpG > 0.5.
+zcat cpgIslandExtUnmasked.txt.gz | awk -F"\t" '{gsub(/chr/,"",$2); printf ("%s\t%s\t%s\t%s\n"),$2,$3,$4,$10}' | awk -F"\t" '($1=="2L") || ($1=="2R") || ($1=="3L") || ($1=="3R") || ($1=="X")' > cpgIsland_exclude_regions.bed #26310
+
+#Additionally, I downloaded the complete gff file for the v6.14 of the Drosophila reference genome (and an alternative version) from here: https://ftp.flybase.net/genomes/dmel/dmel_r6.14_FB2017_01/gff/
+
+#Transcriptionally active regions: filter from the general gff file those regions matching the following libraries: Insulator_Class_*, mE1_HDAC_PRE*, mE1_TFBS_*, BDTNP1_TFBS_*.
+awk '($1=="2L") || ($1=="2R") || ($1=="3L") || ($1=="3R") || ($1=="X")' dmel-all-r6.14.gff | grep -E "Insulator_Class_|mE1_HDAC_PRE|mE1_TFBS_|BDTNP1_TFBS_" | awk '{printf ("%s\t%s\t%s\t%s\n"),$1,$4,$5,$2}' | bedtools merge > transcriptional_regulation_regions.bed #28715
+
+#Finally, combine all the exclusion bed files into a single one:
+cat phyloP_exclude_regions.bed phastCons_exclude_regions.bed cpgIsland_exclude_regions.bed transcriptional_regulation_regions.bed | cut -f-3 | bedtools sort | bedtools merge > exclusion_tracks_combined.bed #34324 regions spanning 66576056 sites (out of 133880602 total sites in chr 2L, 2R, 3L, 3R and X), that is, 49.73% of the genome will be excluded. Only 5168802 are shared with the repetitive regions bed, which contains a total of 22769366 sites across chr 2L, 2R, 3L, 3R and X.
+
+```
+
+###Filter the VCF.
+```{R, engine='bash'}
+
+module load gcc/7.2.0
+module add gcc/7.2.0
+
+cd /share/rdata2/dani_k/seleccion_fondo/variants
+VCF=BS_allpops_autosomes.masked.bcf_filtered.DP_filtered.hard_filtered.nr_annovar.dm6nr_multianno.vcf #BS_allpops_autosomes.masked.bcf_filtered.DP_filtered.hard_filtered.nr_annovar.dm6nr_multianno.vcf BS_allpops_Xchr.masked.bcf_filtered.DP_filtered.hard_filtered.nr_annovar.dm6nr_multianno.vcf
+
+#First, exclude all selective mutations with negative effects (i.e., non-synonymous and LoF mutations).
+grep -Ev "refGene=stop|refGene=nonsynonymous" $VCF > ${VCF/.vcf/.without_deleterious.vcf} #Autosomes: 1310397; Xchr: 168931
+bedtools intersect -a ${VCF/.vcf/.without_deleterious.vcf} -b /share/rdata2/dani_k/seleccion_fondo/tracks/exclusion_tracks_combined.bed -header > ${VCF/.vcf/.without_deleterious.tracks_excluded.vcf} #Autosomes: 688835; Xchr: 82807
+
+```
+
+
+
