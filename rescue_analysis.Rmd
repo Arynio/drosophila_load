@@ -1361,6 +1361,26 @@ for i in ${INDIVIDUALS[@]}
 
 ```
 
+####Filter-in singletons only:
+```{R, engine='bash'}
+
+#Run the population version first in order to obtain the per-population singletons (see below).
+
+module load gcc/7.2.0 
+module add gcc/7.2.0
+
+cd /share/rdata2/dani_k/proyecto_rescate/counts
+
+INDIVIDUALS=$(ls *_individual.vcf)
+for i in ${INDIVIDUALS[@]}
+  do
+  echo "${i}"
+  POP=$(echo $i | cut -c1)
+  bedtools intersect -a ${i} -b ${POP}_population.singletons.bed > ${i}_individual.singletons.vcf
+  done
+
+```
+
 ##At the population level:
 ###Exclude AF=0:
 ####All sites:
@@ -1411,7 +1431,8 @@ POPULATIONS=$(ls *_population.vcf | cut -c1 | sort | uniq)
 for pop in ${POPULATIONS[@]}
   do
   echo $pop
-  grep ";AC=1;" ${pop}_population.vcf > ${pop}_population.singletons.vcf
+  #grep ";AC=1;" ${pop}_population.vcf > ${pop}_population.singletons.vcf
+  grep ";AC=1;" ${pop}_population.vcf | awk '{printf ("%s\t%s\t%s\n"),$1,$2-1,$2}' > ${pop}_population.singletons.bed
   done
 
 ```
@@ -1681,7 +1702,7 @@ scp ramon.pouso@rua2.uvigo.es://share/rdata2/dani_k/proyecto_rescate/counts/coun
 ```
 
 ##Singletons.
-###All sites:
+###Population level:
 ```{R, engine='bash'}
 
 module load gcc/7.2.0
@@ -1704,6 +1725,33 @@ for pop in ${POPLIST[@]}
 
 #From the local environment:
 scp ramon.pouso@rua2.uvigo.es://share/rdata2/dani_k/proyecto_rescate/counts/singletons_population_NR_summary.txt /Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/rescate/counts/
+
+```
+
+###Individual level:
+```{R, engine='bash'}
+
+module load gcc/7.2.0
+module add gcc/7.2.0
+cd /share/rdata2/dani_k/proyecto_rescate/counts
+
+rm singletons_individual_NR_summary.txt
+echo -e "sample\tpopulation\tfourfold_S\ttolerated_S\tdeleterious_S\tLoF_S" > singletons_individual_NR_summary.txt
+INDLIST=$(ls *"_individual.singletons.vcf")
+for i in ${INDLIST[@]}
+  do
+  echo ${i}
+  SAMPLE=$(echo $i | cut -d'_' -f1)
+  POPULATION=$(echo $SAMPLE | cut -c1)
+  FOURFOLD_S=$(grep "CUSTOM=fourfold;" $i | wc -l)
+  MISTOL_S=$(grep "CUSTOM=tolerated;" $i | wc -l)
+  MISDEL_S=$(grep "CUSTOM=deleterious;" $i | wc -l)
+  LOF_S=$(grep "CUSTOM=LoF;" $i | wc -l)
+  echo -e "$SAMPLE\t$POPULATION\t$FOURFOLD_S\t$MISTOL_S\t$MISDEL_S\t$LOF_S" >> singletons_individual_NR_summary.txt
+  done
+
+#From the local environment:
+scp ramon.pouso@rua2.uvigo.es://share/rdata2/dani_k/proyecto_rescate/counts/singletons_individual_NR_summary.txt /Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/rescate/counts/
 
 ```
 
@@ -1853,6 +1901,7 @@ for (r in unique(pool_counts_copies_4FR$ratio)) {
 }
 print(r_average_vector)
 relativised_pool_counts_copies_4FR <- mutate(pool_counts_copies_4FR, Nrel_value=value/r_average_vector)
+levels(relativised_pool_counts_copies_4FR$population) <- list("Non-R" = "N", "R-BP" = "R")
 
 #For the values relativised by the "N" averages, obtain per population averages (which should be the same as the ones obtained before) and standard errors:
 se <- function(x) sqrt(var(x)/length(x)) #first define the standard error function
@@ -1872,6 +1921,7 @@ for (pop in unique(relativised_pool_counts_copies_4FR$population)) {
 }
 bis_average_relativised_pool_counts_copies_4FR$ratio = factor(bis_average_relativised_pool_counts_copies_4FR$ratio,levels=c("fourfold","tolerated","deleterious","LoF"))
 bis_average_relativised_pool_counts_copies_4FR$population <- as.factor(bis_average_relativised_pool_counts_copies_4FR$population)
+levels(bis_average_relativised_pool_counts_copies_4FR$population) <- list("Non-R" = "N", "R-BP" = "R")
 bis_average_relativised_pool_counts_copies_4FR$avg_Nrel_value <- as.double(bis_average_relativised_pool_counts_copies_4FR$avg_Nrel_value)
 bis_average_relativised_pool_counts_copies_4FR$se_Nrel_value <- as.double(bis_average_relativised_pool_counts_copies_4FR$se_Nrel_value)
 bis_average_relativised_pool_counts_copies_4FR
@@ -1885,24 +1935,26 @@ average_relativised_pool_counts_copies_4FR_ggplot <- ggplot(data=filter(bis_aver
   geom_errorbar(aes(ymin=avg_Nrel_value-se_Nrel_value, ymax=avg_Nrel_value+se_Nrel_value, colour=population),size=0.5,width=0.5) +
   geom_point(aes(colour=population),size=2) + 
   #ggtitle("Proportion of reads at different NM") +
-  ylab("Derived count relative to\n 4fold and the mean of N population") +
+  #ylab("Derived count relative to\n 4fold and the mean of Non-R population") +
+  ylab("Relative derived count") +
   ylim(0.6,1.2) +
   scale_y_continuous(breaks = seq(0.8, 1.2, by = 0.1), limits=c(0.78, 1.12)) +
   #scale_shape_manual(values=c(1,16)) +
-  ggtitle("Population means") +
+  #ggtitle("Population means") +
   guides(colour="none") +
   theme_bw() +
   theme(text=element_text(size=12,face="bold"),
         rect=element_rect(size=1),
         axis.line=element_line(colour="black"),
-        axis.title=element_text(size=16),
+        axis.title=element_text(size=12),
         axis.text=element_text(size=10,colour="black"),
         axis.text.x=element_text(colour="black",size=10),
         #axis.text.y=element_text(size=24,colour="black",margin=margin(t=0.5,unit="cm")),
         #axis.title.y=element_text(size=30,margin=margin(r=0.5,unit="cm")),
+        axis.title.x=element_blank(),
         panel.background=element_blank(),
         panel.border=element_rect(colour="black"),
-        #panel.grid=element_blank(),
+        panel.grid=element_blank(),
         #panel.grid.major=element_line(colour="grey", linetype="dashed", size=0.4),
         plot.margin=unit(c(0.5,0.5,0.5,0.5),"cm"),
         #plot.title=element_text(size=36, face="bold", margin=margin(b=0.5, unit="cm")),
@@ -1917,6 +1969,46 @@ average_relativised_pool_counts_copies_4FR_ggplot
 ggsave("NR_individual_avg_Nrelativised_counts_copies_4FR.pdf", width=15, height=12, units="cm", device="pdf", path=wd_path)
 
 
+#Average version, for the combined figure (see below):
+average_relativised_pool_counts_copies_4FR_ggplot <- ggplot(data=filter(bis_average_relativised_pool_counts_copies_4FR,ratio!="fourfold"), aes(population,avg_Nrel_value)) +
+  #facet_wrap(feature ~ species,nrow=6,ncol=2,scales="free") +
+  facet_grid(. ~ ratio) +
+  geom_errorbar(aes(ymin=avg_Nrel_value-se_Nrel_value, ymax=avg_Nrel_value+se_Nrel_value, colour=population),size=0.5,width=0.5) +
+  geom_point(aes(colour=population),size=2) + 
+  #ggtitle("Proportion of reads at different NM") +
+  #ylab("Derived count relative to\n 4fold and the mean of Non-R population") +
+  ylab("Relative derived count") +
+  ylim(0.6,1.2) +
+  scale_y_continuous(breaks = seq(0.8, 1.2, by = 0.1), limits=c(0.78, 1.12)) +
+  #scale_shape_manual(values=c(1,16)) +
+  #ggtitle("Population means") +
+  guides(colour="none") +
+  theme_bw() +
+  theme(text=element_text(size=12,face="bold"),
+        rect=element_rect(size=1),
+        axis.line=element_line(colour="black"),
+        axis.title=element_text(size=12),
+        axis.text=element_text(size=10,colour="black"),
+        axis.text.x=element_text(colour="black",size=10),
+        #axis.text.y=element_text(size=24,colour="black",margin=margin(t=0.5,unit="cm")),
+        #axis.title.y=element_text(size=30,margin=margin(r=0.5,unit="cm")),
+        axis.title.x=element_blank(),
+        panel.background=element_blank(),
+        panel.border=element_rect(colour="black"),
+        panel.grid=element_blank(),
+        #panel.grid.major=element_line(colour="grey", linetype="dashed", size=0.4),
+        plot.margin=unit(c(0.5,0.5,0.5,-2.5),"cm"),
+        #plot.title=element_text(size=36, face="bold", margin=margin(b=0.5, unit="cm")),
+        legend.background=element_rect(linetype="solid", colour="black", size=.5),
+        #legend.justification=c(0,0),
+        legend.key=element_rect(colour="white"),
+        #legend.key.size=unit(1.3,"cm"),
+        #legend.position="none",
+        legend.title=element_blank()
+  )
+average_relativised_pool_counts_copies_4FR_ggplot
+
+
 #Each line separate version:
 individual_relativised_pool_counts_copies_4FR_ggplot <- ggplot(data=filter(relativised_pool_counts_copies_4FR,ratio!="fourfold"), aes(population,Nrel_value)) +
   #facet_wrap(feature ~ species,nrow=6,ncol=2,scales="free") +
@@ -1924,24 +2016,26 @@ individual_relativised_pool_counts_copies_4FR_ggplot <- ggplot(data=filter(relat
   #geom_errorbar(aes(ymin=avg_value-2*se_value, ymax=avg_value+2*se_value, colour=generation),size=0.5,width=0.5) +
   geom_point(aes(colour=population),size=0.5,position=position_jitter(w=0.2,h=0)) +
   #ggtitle("Proportion of reads at different NM") +
-  ylab("Derived count relative to\n 4fold and the mean of N population") +
+  #ylab("Derived count relative to\n 4fold and the mean of Non-R population") +
+  ylab("Relative derived count") +
   #ylim(0.8,1.1) +
   scale_y_continuous(breaks = seq(0.8, 1.2, by = 0.1), limits=c(0.78, 1.12)) +
   scale_shape_manual(values=c(1,16)) +
-  ggtitle("Individual values") +
+  #ggtitle("Individual values") +
   guides(colour="none") +
   theme_bw() +
   theme(text=element_text(size=12,face="bold"),
         rect=element_rect(size=1),
         axis.line=element_line(colour="black"),
-        axis.title=element_text(size=16),
+        axis.title=element_text(size=12),
         axis.text=element_text(size=10,colour="black"),
         axis.text.x=element_text(colour="black",size=10),
         #axis.text.y=element_text(size=24,colour="black",margin=margin(t=0.5,unit="cm")),
         #axis.title.y=element_text(size=30,margin=margin(r=0.5,unit="cm")),
+        axis.title.x=element_blank(),
         panel.background=element_blank(),
         panel.border=element_rect(colour="black"),
-        #panel.grid=element_blank(),
+        panel.grid=element_blank(),
         #panel.grid.major=element_line(colour="grey", linetype="dashed", size=0.4),
         plot.margin=unit(c(0.5,0.5,0.5,0.5),"cm"),
         #plot.title=element_text(size=36, face="bold", margin=margin(b=0.5, unit="cm")),
@@ -2284,7 +2378,7 @@ relativised_pool_counts_copies_4FR <- mutate(pool_counts_copies_4FR, Nlow_rel_va
 
 #For the values relativised by the "N low" averages, obtain per population averages (which should be the same as the ones obtained before) and standard errors:
 se <- function(x) sqrt(var(x)/length(x)) #first define the standard error function
-bis_average_relativised_pool_counts_copies_4FR <- data_frame("population"=character(0),"recombination"=character(0),"ratio"=character(0),"avg_Nlow_rel_value"=character(0),"se_Nlow_rel_value"=character(0)) #next, create the empty dataframe
+rec_bisaverage_relativised_pool_counts_copies_4FR <- data_frame("population"=character(0),"recombination"=character(0),"ratio"=character(0),"avg_Nlow_rel_value"=character(0),"se_Nlow_rel_value"=character(0)) #next, create the empty dataframe
 for (pop in unique(relativised_pool_counts_copies_4FR$population)) {
   for (rec in unique(pool_counts_copies_4FR$recombination)) {
     for (r in unique(relativised_pool_counts_copies_4FR$ratio)) {
@@ -2295,43 +2389,44 @@ for (pop in unique(relativised_pool_counts_copies_4FR$population)) {
       #print(paste0(pop," feature ",r," std error is ",pop_se))
       row_data <- cbind(pop,rec,r,pop_mean,pop_se)
       colnames(row_data) <- c("population","recombination","ratio","avg_Nlow_rel_value","se_Nlow_rel_value")
-      bis_average_relativised_pool_counts_copies_4FR <- rbind(bis_average_relativised_pool_counts_copies_4FR,row_data,stringsAsFactors=F)
+      rec_bisaverage_relativised_pool_counts_copies_4FR <- rbind(rec_bisaverage_relativised_pool_counts_copies_4FR,row_data,stringsAsFactors=F)
     }
   }
 }
-bis_average_relativised_pool_counts_copies_4FR$ratio = factor(bis_average_relativised_pool_counts_copies_4FR$ratio,levels=c("fourfold","tolerated","deleterious","LoF"))
-bis_average_relativised_pool_counts_copies_4FR$recombination <- factor(bis_average_relativised_pool_counts_copies_4FR$recombination,levels=c("high","low"))
-bis_average_relativised_pool_counts_copies_4FR$population <- as.factor(bis_average_relativised_pool_counts_copies_4FR$population)
-bis_average_relativised_pool_counts_copies_4FR$avg_Nlow_rel_value <- as.double(bis_average_relativised_pool_counts_copies_4FR$avg_Nlow_rel_value)
-bis_average_relativised_pool_counts_copies_4FR$se_Nlow_rel_value <- as.double(bis_average_relativised_pool_counts_copies_4FR$se_Nlow_rel_value)
-bis_average_relativised_pool_counts_copies_4FR
+rec_bisaverage_relativised_pool_counts_copies_4FR$ratio = factor(rec_bisaverage_relativised_pool_counts_copies_4FR$ratio,levels=c("fourfold","tolerated","deleterious","LoF"))
+rec_bisaverage_relativised_pool_counts_copies_4FR$recombination <- factor(rec_bisaverage_relativised_pool_counts_copies_4FR$recombination,levels=c("high","low"))
+rec_bisaverage_relativised_pool_counts_copies_4FR$population <- as.factor(rec_bisaverage_relativised_pool_counts_copies_4FR$population)
+levels(rec_bisaverage_relativised_pool_counts_copies_4FR$population) <- list("Non-R" = "N", "R-BP" = "R")
+rec_bisaverage_relativised_pool_counts_copies_4FR$avg_Nlow_rel_value <- as.double(rec_bisaverage_relativised_pool_counts_copies_4FR$avg_Nlow_rel_value)
+rec_bisaverage_relativised_pool_counts_copies_4FR$se_Nlow_rel_value <- as.double(rec_bisaverage_relativised_pool_counts_copies_4FR$se_Nlow_rel_value)
+rec_bisaverage_relativised_pool_counts_copies_4FR
 
 
 #Average version:
-bis_average_relativised_pool_counts_copies_4FR_ggplot <- ggplot(data=filter(bis_average_relativised_pool_counts_copies_4FR,ratio!="fourfold"), aes(recombination,avg_Nlow_rel_value,group=interaction(recombination,population))) +
+bis_average_relativised_pool_counts_copies_4FR_ggplot <- ggplot(data=filter(rec_bis_average_relativised_pool_counts_copies_4FR,ratio!="fourfold"), aes(recombination,avg_Nlow_rel_value,group=interaction(recombination,population))) +
   #facet_wrap(feature ~ species,nrow=6,ncol=2,scales="free") +
   facet_grid(. ~ ratio) +
   geom_errorbar(aes(ymin=avg_Nlow_rel_value-se_Nlow_rel_value, ymax=avg_Nlow_rel_value+se_Nlow_rel_value, colour=population, group=interaction(recombination,population)),size=0.5,width=0.5,position=position_dodge(0.4)) +
   geom_point(aes(fill=population,shape=population),size=2,position=position_dodge(0.4)) +
   #ggtitle("Proportion of reads at different NM") +
-  ylab("Relative derived count") + #ylab("Derived count relative to 4fold and\n the mean of low rec. N population") +
-  xlab("Recombination") +
+  ylab("Relative derived count") + #ylab("Derived count relative to 4fold and\n the mean of low rec. Non-R population") +
+  xlab("Recombination quartile") +
   ylim(0.6,1.2) +
   scale_y_continuous(breaks = seq(0.4, 1.1, by = 0.2), limits=c(0.4, 1.1)) +
-  scale_shape_manual(name="Population",labels=c("N","R"),values=c(21,23)) +
+  scale_shape_manual(name="Population",labels=c("Non-R","R-BP"),values=c(21,23)) +
   scale_alpha_manual(values=c(0.8,0.4)) +
-  scale_fill_manual(name="Population",labels=c("N","R"),values=c("#F8766D","#00BFC4")) +
+  scale_fill_manual(name="Population",labels=c("Non-R","R-BP"),values=c("#F8766D","#00BFC4")) +
   #ggtitle("High vs. low recombination") +
   guides(colour="none") +
   labs(shape = "Population") +
   theme_bw() +
-  theme(text=element_text(size=9,face="bold"),
+  theme(text=element_text(size=12,face="bold"),
         rect=element_rect(size=1),
         axis.line=element_line(colour="black"),
         #axis.title=element_blank(),
-        axis.title=element_text(size=11,colour="black"),
-        axis.text=element_text(size=8,colour="black"),
-        axis.text.x=element_text(colour="black", vjust=1),
+        axis.title=element_text(size=12,colour="black"),
+        axis.text=element_text(size=10,colour="black"),
+        axis.text.x=element_text(colour="black", size=10),
         #axis.text.y=element_text(size=24,colour="black",margin=margin(t=0.5,unit="cm")),
         #axis.title.y=element_text(size=30,margin=margin(r=0.5,unit="cm")),
         panel.background=element_blank(),
@@ -2348,12 +2443,29 @@ bis_average_relativised_pool_counts_copies_4FR_ggplot <- ggplot(data=filter(bis_
         legend.title=element_text()
   )
 bis_average_relativised_pool_counts_copies_4FR_ggplot
-ggsave("NR_individual_avg_Nlow_relativised_counts_copies_4FR.recombination.pdf", width=12, height=8, units="cm", device="pdf", path=wd_path)
+ggsave("NR_individual_avg_Nlow_relativised_counts_copies_4FR.recombination.pdf", width=15, height=12, units="cm", device="pdf", path=wd_path)
+
+```
+
+
+####Combine all sites and recombination:
+```{r Plot variant count results}
+
+library(grid)
+library(gridExtra)
+library(egg)
+
+average_relativised_pool_counts_copies_4FR_ggplot
+bis_average_relativised_pool_counts_copies_4FR_ggplot
+
+ggplot_combined <- grid.arrange(set_panel_size(average_relativised_pool_counts_copies_4FR_ggplot,width=unit(4,"cm"),height=unit(6,"cm")),set_panel_size(bis_average_relativised_pool_counts_copies_4FR_ggplot,width=unit(4,"cm"),height=unit(6,"cm")),ncol=1,top=textGrob(expression(bold("A")), gp=gpar(fontsize=11,fontface="bold"),hjust=32.5),left=textGrob(expression(bold("B")), gp=gpar(fontsize=11,fontface="bold")))
+
+ggsave("20240618_main_rescue.pdf", width=18, height=17, units="cm", device="pdf", path="/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/rescate/counts/",ggplot_combined)
 
 ```
 
 ###Singletons (relative to 4fold and non-rescued-average):
-####All sites:
+####Population level:
 ```{r Plot variant count results}
 
 library(readr)
@@ -2372,6 +2484,7 @@ pool_counts$population = factor(pool_counts$population)
 pool_counts_copies_4FR <- pool_counts %>% mutate(fourfold=fourfold_S/fourfold_S,tolerated=tolerated_S/fourfold_S,deleterious=deleterious_S/fourfold_S,LoF=LoF_S/fourfold_S) %>% select(!contains(c("_V","_S"))) %>% gather(ratio,value,-population,factor_key=T) %>% arrange(population,ratio)
 pool_counts_copies_4FR
 
+
 #Relativise averages by the "N" population averages:
 r_average_vector <- c()
 for (p in unique(pool_counts_copies_4FR$population)) {
@@ -2386,10 +2499,204 @@ relativised_pool_counts_copies_4FR <- dplyr::mutate(pool_counts_copies_4FR, Nrel
 
 
 #Relativised version:
-relativised_pool_counts_copies_4FR_ggplot <- ggplot(data=filter(relativised_pool_counts_copies_4FR,ratio!="fourfold"), aes(population,Nrel_value)) +
+relativised_pool_counts_copies_4FR_ggplot <- ggplot(data=filter(bis_average_relativised_pool_counts_copies_4FR,ratio!="fourfold"), aes(population,Nrel_value)) +
   #facet_wrap(feature ~ species,nrow=6,ncol=2,scales="free") +
   facet_grid(. ~ ratio) +
+  geom_errorbar(aes(ymin=avg_Nrel_value-se_Nrel_value, ymax=avg_Nrel_value+se_Nrel_value, colour=population),size=0.5,width=0.5) +
+  geom_point(aes(colour=population),size=2) + 
+  #ggtitle("Proportion of reads at different NM") +
+  ylab("Derived singleton count relative to\n 4fold and the mean of N population") +
+  ylim(0.6,1.2) +
+  scale_y_continuous(breaks = seq(0, 2, by = 0.5), limits=c(0, 2)) +
+  #scale_shape_manual(values=c(1,16)) +
+  ggtitle("Singletons") +
+  guides(colour="none") +
+  theme_bw() +
+  theme(text=element_text(size=12,face="bold"),
+        rect=element_rect(size=1),
+        axis.line=element_line(colour="black"),
+        axis.title=element_text(size=16),
+        axis.text=element_text(size=10,colour="black"),
+        axis.text.x=element_text(colour="black",size=10),
+        #axis.text.y=element_text(size=24,colour="black",margin=margin(t=0.5,unit="cm")),
+        #axis.title.y=element_text(size=30,margin=margin(r=0.5,unit="cm")),
+        panel.background=element_blank(),
+        panel.border=element_rect(colour="black"),
+        #panel.grid=element_blank(),
+        #panel.grid.major=element_line(colour="grey", linetype="dashed", size=0.4),
+        plot.margin=unit(c(0.5,0.5,0.5,0.5),"cm"),
+        #plot.title=element_text(size=36, face="bold", margin=margin(b=0.5, unit="cm")),
+        legend.background=element_rect(linetype="solid", colour="black", size=.5),
+        #legend.justification=c(0,0),
+        legend.key=element_rect(colour="white"),
+        #legend.key.size=unit(1.3,"cm"),
+        #legend.position="none",
+        legend.title=element_blank()
+  )
+relativised_pool_counts_copies_4FR_ggplot
+ggsave("NR_population_Nrelativised_singletons_4FR.pdf", width=15, height=12, units="cm", device="pdf", path=wd_path)
+
+
+#Relativise by fourfold values:
+pool_counts_copies_raw <- pool_counts %>% gather(ratio,value,-population,factor_key=T) %>% arrange(population,ratio)
+pool_counts_copies_raw
+
+#Absolute version:
+pool_counts_copies_ggplot <- ggplot(data=filter(pool_counts_copies_raw,ratio!="fourfold_S"), aes(population,value)) +
+  #facet_wrap(feature ~ species,nrow=6,ncol=2,scales="free") +
+  facet_wrap(. ~ ratio,scales="free_y") +
   #geom_errorbar(aes(ymin=avg_Nrel_value-se_Nrel_value, ymax=avg_Nrel_value+se_Nrel_value, colour=population),size=0.5,width=0.5) +
+  geom_point(aes(colour=population),size=2) + 
+  #ggtitle("Proportion of reads at different NM") +
+  ylab("Derived singleton count") +
+  #ylim(0.6,1.2) +
+  #scale_y_continuous(breaks = seq(0, 2, by = 0.5), limits=c(0, 2)) +
+  #scale_shape_manual(values=c(1,16)) +
+  ggtitle("Singletons") +
+  guides(colour="none") +
+  theme_bw() +
+  theme(text=element_text(size=12,face="bold"),
+        rect=element_rect(size=1),
+        axis.line=element_line(colour="black"),
+        axis.title=element_text(size=16),
+        axis.text=element_text(size=10,colour="black"),
+        axis.text.x=element_text(colour="black",size=10),
+        #axis.text.y=element_text(size=24,colour="black",margin=margin(t=0.5,unit="cm")),
+        #axis.title.y=element_text(size=30,margin=margin(r=0.5,unit="cm")),
+        panel.background=element_blank(),
+        panel.border=element_rect(colour="black"),
+        #panel.grid=element_blank(),
+        #panel.grid.major=element_line(colour="grey", linetype="dashed", size=0.4),
+        plot.margin=unit(c(0.5,0.5,0.5,0.5),"cm"),
+        #plot.title=element_text(size=36, face="bold", margin=margin(b=0.5, unit="cm")),
+        legend.background=element_rect(linetype="solid", colour="black", size=.5),
+        #legend.justification=c(0,0),
+        legend.key=element_rect(colour="white"),
+        #legend.key.size=unit(1.3,"cm"),
+        #legend.position="none",
+        legend.title=element_blank()
+  )
+pool_counts_copies_ggplot
+ggsave("NR_population_singletons_raw.pdf", width=15, height=12, units="cm", device="pdf", path=wd_path)
+
+```
+
+####Individual level:
+```{r Plot variant count results}
+
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(scales)
+
+
+#Define variables and read raw counts file:
+wd_path <- paste0("/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/rescate/counts/")
+pool_counts <- read_tsv(paste0(wd_path,"singletons_individual_NR_summary.txt"))
+pool_counts$population = factor(pool_counts$population)
+
+#Relativise by fourfold values:
+pool_counts_copies_4FR <- pool_counts %>% mutate(fourfold=fourfold_S/fourfold_S,tolerated=tolerated_S/fourfold_S,deleterious=deleterious_S/fourfold_S,LoF=LoF_S/fourfold_S) %>% select(!contains(c("_V","_S"))) %>% gather(ratio,value,-sample,-population,factor_key=T) %>% arrange(population,ratio)
+pool_counts_copies_4FR
+
+#Replace NaN with 0:
+is.nan.data.frame <- function(x)
+  do.call(cbind, lapply(x, is.nan))
+pool_counts_copies_4FR[is.nan(pool_counts_copies_4FR)] <- 0
+
+
+#Obtain per population averages and standard errors:
+se <- function(x) sqrt(var(x)/length(x)) #first define the standard error function
+average_pool_counts_copies_4FR <- data_frame("population"=character(0),"ratio"=character(0),"avg_value"=character(0),"se_value"=character(0)) #next, create the empty dataframe
+for (pop in unique(pool_counts_copies_4FR$population)) {
+#species <- filter(relativised_pool_counts_copies_4FR,ratio==r & population==pop) %>% select(species) %>% unlist(.,use.names=F) %>% unique()
+  for (r in unique(pool_counts_copies_4FR$ratio)) {
+    print(r)
+    pop_mean <- filter(pool_counts_copies_4FR,ratio==r & population==pop) %>% select(value) %>% unlist(.,use.names=F) %>% mean()
+    #print(paste0(pop," feature ",r," average is ",pop_mean))
+    pop_se <- filter(pool_counts_copies_4FR,ratio==r & population==pop) %>% select(value) %>% unlist(.,use.names=F) %>% se()
+    #print(paste0(pop," feature ",r," std error is ",pop_se))
+    row_data <- cbind(pop,r,pop_mean,pop_se)
+    colnames(row_data) <- c("population","ratio","avg_value","se_value")
+    average_pool_counts_copies_4FR <- rbind(average_pool_counts_copies_4FR,row_data,stringsAsFactors=F)
+  }
+}
+average_pool_counts_copies_4FR$ratio = factor(average_pool_counts_copies_4FR$ratio,levels=c("fourfold","tolerated","deleterious","LoF"))
+average_pool_counts_copies_4FR$population <- as.factor(average_pool_counts_copies_4FR$population)
+average_pool_counts_copies_4FR$avg_value <- as.double(average_pool_counts_copies_4FR$avg_value)
+average_pool_counts_copies_4FR$se_value <- as.double(average_pool_counts_copies_4FR$se_value)
+average_pool_counts_copies_4FR
+
+#Relativise averages by the "N" population averages:
+r_average_vector <- c()
+for (p in unique(average_pool_counts_copies_4FR$population)) {
+  for (r in unique(average_pool_counts_copies_4FR$ratio)) {
+    print(r)
+    r_average <- filter(average_pool_counts_copies_4FR,r==ratio & population=="N") %>% select(avg_value) %>% unlist(.,use.names=F) %>% as.double()
+    r_average_vector <- c(r_average_vector,r_average)
+  }
+}
+print(r_average_vector)
+average_relativised_pool_counts_copies_4FR <- dplyr::mutate(average_pool_counts_copies_4FR, Nrel_avg_value=avg_value/r_average_vector)
+
+#Obtain individual values relativised by the "N" population averages:
+r_average_vector <- c()
+for (r in unique(pool_counts_copies_4FR$ratio)) {
+  print(r)
+  for (p in unique(pool_counts_copies_4FR$population)) {
+    r_average <- filter(pool_counts_copies_4FR,ratio==r & population=="N") %>% select(value) %>% unlist(.,use.names=F) %>% as.double() %>% mean()
+    r_average_vector <- c(r_average_vector,rep(r_average,filter(pool_counts_copies_4FR,ratio==r & population=="N") %>% nrow()))
+  }
+}
+print(r_average_vector)
+relativised_pool_counts_copies_4FR <- mutate(pool_counts_copies_4FR, Nrel_value=value/r_average_vector)
+
+#For the values relativised by the "N" averages, obtain per population averages (which should be the same as the ones obtained before) and standard errors:
+se <- function(x) sqrt(var(x)/length(x)) #first define the standard error function
+bis_average_relativised_pool_counts_copies_4FR <- data_frame("population"=character(0),"ratio"=character(0),"avg_Nrel_value"=character(0),"se_Nrel_value"=character(0)) #next, create the empty dataframe
+for (pop in unique(relativised_pool_counts_copies_4FR$population)) {
+#species <- filter(relativised_pool_counts_copies_4FR,ratio==r & population==pop) %>% select(species) %>% unlist(.,use.names=F) %>% unique()
+  for (r in unique(relativised_pool_counts_copies_4FR$ratio)) {
+    print(r)
+    pop_mean <- filter(relativised_pool_counts_copies_4FR,ratio==r & population==pop) %>% select(Nrel_value) %>% unlist(.,use.names=F) %>% mean()
+    #print(paste0(pop," feature ",r," average is ",pop_mean))
+    pop_se <- filter(relativised_pool_counts_copies_4FR,ratio==r & population==pop) %>% select(Nrel_value) %>% unlist(.,use.names=F) %>% se()
+    #print(paste0(pop," feature ",r," std error is ",pop_se))
+    row_data <- cbind(pop,r,pop_mean,pop_se)
+    colnames(row_data) <- c("population","ratio","avg_Nrel_value","se_Nrel_value")
+    bis_average_relativised_pool_counts_copies_4FR <- rbind(bis_average_relativised_pool_counts_copies_4FR,row_data,stringsAsFactors=F)
+  }
+}
+bis_average_relativised_pool_counts_copies_4FR$ratio = factor(bis_average_relativised_pool_counts_copies_4FR$ratio,levels=c("fourfold","tolerated","deleterious","LoF"))
+bis_average_relativised_pool_counts_copies_4FR$population <- as.factor(bis_average_relativised_pool_counts_copies_4FR$population)
+bis_average_relativised_pool_counts_copies_4FR$avg_Nrel_value <- as.double(bis_average_relativised_pool_counts_copies_4FR$avg_Nrel_value)
+bis_average_relativised_pool_counts_copies_4FR$se_Nrel_value <- as.double(bis_average_relativised_pool_counts_copies_4FR$se_Nrel_value)
+bis_average_relativised_pool_counts_copies_4FR
+
+  
+***** REMOVE THE FOLLOWING IF IT HAS BEEN INTEGRATED ABOVE?
+
+
+#Relativise averages by the "N" population averages:
+r_average_vector <- c()
+for (p in unique(pool_counts_copies_4FR$population)) {
+  for (r in unique(pool_counts_copies_4FR$ratio)) {
+    print(r)
+    r_average <- filter(pool_counts_copies_4FR,r==ratio & population=="N") %>% select(value) %>% unlist(.,use.names=F) %>% as.double()
+    r_average_vector <- c(r_average_vector,r_average)
+  }
+}
+print(r_average_vector)
+relativised_pool_counts_copies_4FR <- dplyr::mutate(pool_counts_copies_4FR, Nrel_value=value/r_average_vector)
+
+*****
+
+#Relativised version:
+relativised_pool_counts_copies_4FR_ggplot <- ggplot(data=filter(bis_average_relativised_pool_counts_copies_4FR,ratio!="fourfold"), aes(population,Nrel_value)) +
+  #facet_wrap(feature ~ species,nrow=6,ncol=2,scales="free") +
+  facet_grid(. ~ ratio) +
+  geom_errorbar(aes(ymin=avg_Nrel_value-se_Nrel_value, ymax=avg_Nrel_value+se_Nrel_value, colour=population),size=0.5,width=0.5) +
   geom_point(aes(colour=population),size=2) + 
   #ggtitle("Proportion of reads at different NM") +
   ylab("Derived singleton count relative to\n 4fold and the mean of N population") +
