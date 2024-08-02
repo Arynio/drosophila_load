@@ -1836,26 +1836,30 @@ shuf crisp_all_pools_gen0-140.recode_snps.gen0-140_Pb_0_variable_set.orthologs.c
 ```
 
 #7. Import all annotations into the VCF.
-##Gen0-140.
+##Gen0-140 (custom_complete)
 ```{bash}
 
 module load gcc/7.2.0
 module add gcc/7.2.0
 
-cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/
 
-rm crisp_all_pools_gen0-140.recode_snps.gen0-140_Pb_0_variable_set.orthologs.confident.polarized.annovar.dm6_multianno.custom_unsorted.vcf
+VCF=crisp_all_pools_gen0-140.recode_snps.gen0-140_Pb_0_variable_set.orthologs.confident.polarized.annovar.dm6_multianno.vcf
+
+rm ${VCF/vcf/custom_unsorted.vcf}
+#Not fourfold (i.e. synonymous but not fourfold degenerate), which will be obtained first as the difference between all synonymous variants and the list of fourfold ones:
+#grep -E '^#|ExonicFunc.refGene=synonymous_SNV;' $VCF | bedtools subtract -a stdin -b /share/rdata/ramon.pouso/counts/synonymous_variants_4fold.bed | awk '{printf ("%s\t%s\t%s\n", $1,$2-1,$2)}' > /share/rdata/ramon.pouso/counts/synonymous_variants_NOT4fold.bed #this line doesn't need to be executed if the bed already exists.
+bedtools intersect -a $VCF -b /share/rdata/ramon.pouso/counts/synonymous_variants_NOT4fold.bed | awk '{gsub("NP=44;","CUSTOM=non-fourfold;NP=44;"); print}' >> ${VCF/vcf/custom_unsorted.vcf}
 #Fourfold:
-bedtools intersect -a crisp_all_pools_gen0-140.recode_snps.gen0-140_Pb_0_variable_set.orthologs.confident.polarized.annovar.dm6_multianno.vcf -b /share/rdata/ramon.pouso/counts/synonymous_variants_4fold.bed | awk '{gsub("NP=44;","CUSTOM=fourfold;NP=44;"); print}' >> crisp_all_pools_gen0-140.recode_snps.gen0-140_Pb_0_variable_set.orthologs.confident.polarized.annovar.dm6_multianno.custom_unsorted.vcf
+bedtools intersect -a $VCF -b /share/rdata/ramon.pouso/counts/synonymous_variants_4fold.bed | awk '{gsub("NP=44;","CUSTOM=fourfold;NP=44;"); print}' >> ${VCF/vcf/custom_unsorted.vcf}
 #Tolerated:
-bedtools intersect -a crisp_all_pools_gen0-140.recode_snps.gen0-140_Pb_0_variable_set.orthologs.confident.polarized.annovar.dm6_multianno.vcf -b /share/rdata/ramon.pouso/counts/missense_variants_provean_SIFT_tolerated.bed | awk '{gsub("NP=44;","CUSTOM=tolerated;NP=44;"); print}' >> crisp_all_pools_gen0-140.recode_snps.gen0-140_Pb_0_variable_set.orthologs.confident.polarized.annovar.dm6_multianno.custom_unsorted.vcf
+bedtools intersect -a $VCF -b /share/rdata/ramon.pouso/counts/missense_variants_provean_SIFT_tolerated.bed | awk '{gsub("NP=44;","CUSTOM=tolerated;NP=44;"); print}' >> ${VCF/vcf/custom_unsorted.vcf}
 #Deleterious:
-bedtools intersect -a crisp_all_pools_gen0-140.recode_snps.gen0-140_Pb_0_variable_set.orthologs.confident.polarized.annovar.dm6_multianno.vcf -b /share/rdata/ramon.pouso/counts/missense_variants_provean_SIFT_deleterious.bed | awk '{gsub("NP=44;","CUSTOM=deleterious;NP=44;"); print}' >> crisp_all_pools_gen0-140.recode_snps.gen0-140_Pb_0_variable_set.orthologs.confident.polarized.annovar.dm6_multianno.custom_unsorted.vcf
+bedtools intersect -a $VCF -b /share/rdata/ramon.pouso/counts/missense_variants_provean_SIFT_deleterious.bed | awk '{gsub("NP=44;","CUSTOM=deleterious;NP=44;"); print}' >> ${VCF/vcf/custom_unsorted.vcf}
 #LoF:
-grep -E ';ExonicFunc.refGene=stopgain;|;ExonicFunc.refGene=stoploss;' crisp_all_pools_gen0-140.recode_snps.gen0-140_Pb_0_variable_set.orthologs.confident.polarized.annovar.dm6_multianno.vcf | awk '{gsub("NP=44;","CUSTOM=LoF;NP=44;"); print}' >> crisp_all_pools_gen0-140.recode_snps.gen0-140_Pb_0_variable_set.orthologs.confident.polarized.annovar.dm6_multianno.custom_unsorted.vcf
+grep -E ';ExonicFunc.refGene=stopgain;|;ExonicFunc.refGene=stoploss;' $VCF | awk '{gsub("NP=44;","CUSTOM=LoF;NP=44;"); print}' >> ${VCF/vcf/custom_unsorted.vcf}
 
 #Sort the VCF and add the headers:
-#Headers:
-cat <(grep "^#" crisp_all_pools_gen0-140.recode_snps.gen0-140_Pb_0_variable_set.orthologs.confident.polarized.annovar.dm6_multianno.vcf) <(sort -k1,1 -k2,2n crisp_all_pools_gen0-140.recode_snps.gen0-140_Pb_0_variable_set.orthologs.confident.polarized.annovar.dm6_multianno.custom_unsorted.vcf) > crisp_all_pools_gen0-140.recode_snps.gen0-140_Pb_0_variable_set.orthologs.confident.polarized.annovar.dm6_multianno.custom.vcf
+cat <(grep "^#" $VCF) <(sort -k1,1 -k2,2n ${VCF/vcf/custom_unsorted.vcf}) > ${VCF/vcf/custom_complete.vcf}
 
 ```
