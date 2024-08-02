@@ -924,7 +924,7 @@ mkdir -p /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/pools_counts/
 
 cd /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/
 
-VCF="/share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/crisp_all_pools_gen0-140.recode_snps.gen0-140_Pb_0_variable_set.orthologs.confident.polarized.annovar.dm6_multianno.vcf"
+VCF="/share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/crisp_all_pools_gen0-140.recode_snps.gen0-140_Pb_0_variable_set.orthologs.confident.polarized.annovar.dm6_multianno.custom_complete.vcf"
 SUBSET="gen0-140"
 echo $SUBSET
 
@@ -945,6 +945,7 @@ for p in ${POOLS[@]}
   fi
   done
 
+cd pools_counts/$SUBSET/
 mv LBT0_gen0-140_pool.txt LBT0_gen0_gen0-140_pool.txt
 mv c1_gen0-140_pool.txt c1_gen5_gen0-140_pool.txt
 mv BT20_gen0-140_pool.txt BT20_gen20_gen0-140_pool.txt
@@ -1966,6 +1967,50 @@ paste sites_missing_from_gen140_lost_in_gen140.autosomes_summary.txt sites_missi
 ###Pools:
 ####Exclude AF=0 VCFs:
 #####Count variants and derived copies, gen 0-140 VCF:
+######New version, extended categories:
+```{R, engine='bash'}
+
+SUBSET="gen0-140"
+REGION="autosomes" #all #autosomes #Xchr
+
+module load gcc/7.2.0
+module add gcc/7.2.0
+cd /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/pools_counts/$SUBSET/
+rm counts_pool_${SUBSET}_${REGION}_summary.complete.txt
+echo -e "sample\tgeneration\tnon-fourfold_V\tnon-fourfold_D\tfourfold_V\tfourfold_D\ttolerated_V\ttolerated_D\tdeleterious_V\tdeleterious_D\tLoF_V\tLoF_D" > counts_pool_${SUBSET}_${REGION}_summary.complete.txt
+POOL_LIST=($(ls -v `find . -maxdepth 1 -name '*_'${SUBSET}'_pool.txt' -print`))
+for pool in "${POOL_LIST[@]}"
+  do
+  echo "${pool}"
+  SAMPLE=$(echo "${pool}" | cut -d'/' -f2 | cut -d'_' -f1)
+  GEN=$(echo "${pool}" | cut -d'/' -f2 | cut -d'_' -f2)
+  if [ $REGION == "autosomes" ]
+    then
+    grep -v "^X" $pool > ${pool/.txt/_${REGION}.txt}
+    p=${pool/.txt/_${REGION}.txt}
+  elif [ $REGION == "Xchr" ]
+    then
+    grep "^X" $pool > ${pool/.txt/_${REGION}.txt}
+    p=${pool/.txt/_${REGION}.txt}
+  elif [ $REGION == "all" ]
+    then
+    p=${pool}
+  fi
+  NONFOURFOLD_V=$(grep "CUSTOM=non-fourfold;" $p | wc -l)
+  NONFOURFOLD_D=$(grep "CUSTOM=non-fourfold;" $p | awk '{print $10}' | paste -sd+ | bc)
+  FOURFOLD_V=$(grep "CUSTOM=fourfold;" $p | wc -l)
+  FOURFOLD_D=$(grep "CUSTOM=fourfold;" $p | awk '{print $10}' | paste -sd+ | bc)
+  MISTOL_V=$(grep "CUSTOM=tolerated;" $p | wc -l)
+  MISTOL_D=$(grep "CUSTOM=tolerated;" $p | awk '{print $10}' | paste -sd+ | bc)
+  MISDEL_V=$(grep "CUSTOM=deleterious;" $p | wc -l)
+  MISDEL_D=$(grep "CUSTOM=deleterious;" $p | awk '{print $10}' | paste -sd+ | bc)
+  LOF_V=$(grep "CUSTOM=LoF;" $p | wc -l)
+  LOF_D=$(grep "CUSTOM=LoF;" $p | awk '{print $10}' | paste -sd+ | bc)
+  echo -e "$SAMPLE\t$GEN\t$NONFOURFOLD_V\t$NONFOURFOLD_D\t$FOURFOLD_V\t$FOURFOLD_D\t$MISTOL_V\t$MISTOL_D\t$MISDEL_V\t$MISDEL_D\t$LOF_V\t$LOF_D" >> counts_pool_${SUBSET}_${REGION}_summary.complete.txt
+  done
+
+```
+
 ######All sites in the dataset:
 ```{R, engine='bash'}
 
@@ -2137,7 +2182,7 @@ scp ramon.pouso@rua2.uvigo.es://share/rdata/ramon.pouso/counts/sites_in_0-140_VC
 ```{R, engine='bash'}
 
 SUBSET="gen0-140"
-REGION="Xchr" #all #autosomes #Xchr
+REGION="autosomes" #all #autosomes #Xchr
 
 module load gcc/7.2.0
 module add gcc/7.2.0
@@ -2174,6 +2219,50 @@ for pool in "${POOL_LIST[@]}"
   done
 
 scp ramon.pouso@rua2.uvigo.es://share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/pools_counts/gen0-140/counts_pool_gen0-140_all_summary.txt /Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/gen0-140/
+
+```
+
+######Valid SNPs subset:
+```{R, engine='bash'}
+
+SUBSET="gen0-140"
+REGION="autosomes" #all #autosomes #Xchr
+
+module load gcc/7.2.0
+module add gcc/7.2.0
+cd /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/pools_counts/$SUBSET/key_categories
+rm counts_pool_${SUBSET}_${REGION}_summary.validated_subset.txt
+echo -e "sample\tgeneration\tfourfold_V\tfourfold_D\ttolerated_V\ttolerated_D\tdeleterious_V\tdeleterious_D\tLoF_V\tLoF_D" > counts_pool_${SUBSET}_${REGION}_summary.validated_subset.txt
+POOL_LIST=($(ls -v `find . -name '*_'${SUBSET}'_pool.txt' -print`))
+for pool in "${POOL_LIST[@]}"
+  do
+  echo "${pool}"
+  SAMPLE=$(echo "${pool}" | cut -d'/' -f2 | cut -d'_' -f1)
+  GEN=$(echo "${pool}" | cut -d'/' -f2 | cut -d'_' -f2)
+  if [ $REGION == "autosomes" ]
+    then
+    bedtools subtract -a $pool -b /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.polarized.nr_annovar.dm6nr_multianno.custom_complete.non_validated_snps.bed | grep -v "^X" > ${pool/.txt/.validated_subset_${REGION}.txt}
+    p=${pool/.txt/.validated_subset_${REGION}.txt}
+  elif [ $REGION == "Xchr" ]
+    then
+    bedtools subtract -a $pool -b /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.polarized.nr_annovar.dm6nr_multianno.custom_complete.non_validated_snps.bed | grep "^X" > ${pool/.txt/.validated_subset_${REGION}.txt}
+    p=${pool/.txt/.validated_subset_${REGION}.txt}
+  elif [ $REGION == "all" ]
+    then
+    p=${pool}
+  fi
+  FOURFOLD_V=$(grep "CUSTOM=fourfold;" $p | wc -l)
+  FOURFOLD_D=$(grep "CUSTOM=fourfold;" $p | awk '{print $11}' | paste -sd+ | bc)
+  MISTOL_V=$(grep "CUSTOM=tolerated;" $p | wc -l)
+  MISTOL_D=$(grep "CUSTOM=tolerated;" $p | awk '{print $11}' | paste -sd+ | bc)
+  MISDEL_V=$(grep "CUSTOM=deleterious;" $p | wc -l)
+  MISDEL_D=$(grep "CUSTOM=deleterious;" $p | awk '{print $11}' | paste -sd+ | bc)
+  LOF_V=$(grep "CUSTOM=LoF;" $p | wc -l)
+  LOF_D=$(grep "CUSTOM=LoF;" $p | awk '{print $11}' | paste -sd+ | bc)
+  echo -e "$SAMPLE\t$GEN\t$FOURFOLD_V\t$FOURFOLD_D\t$MISTOL_V\t$MISTOL_D\t$MISDEL_V\t$MISDEL_D\t$LOF_V\t$LOF_D" >> counts_pool_${SUBSET}_${REGION}_summary.validated_subset.txt
+  done
+
+scp ramon.pouso@rua2.uvigo.es://share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/pools_counts/gen0-140/counts_pool_gen0-140_all_summary.validated_subset.txt /Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/gen0-140/
 
 ```
 
