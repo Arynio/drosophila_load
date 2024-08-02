@@ -318,6 +318,105 @@ for BLOCK in ${BLOCKLIST[@]}
 
 ```
 
+####Valid SNP subset:
+```{r, eval=FALSE, engine='bash'}
+
+#Run it as follows:
+PARALLEL=20
+REGION="autosomes" #where REGION should be replaced with either "autosomes" or "Xchr"
+cd /share/rdata/ramon.pouso/bootstrap/derived_allele_counts/$REGION
+mkdir -p block_counts
+qsub -cwd -l h=compute-0-9 -t 1-$PARALLEL /share/rdata/ramon.pouso/bootstrap/derived_allele_counts/derived_allele_counts_validated_subset.sh $REGION
+
+***************************** #save code from here on as /share/rdata/ramon.pouso/bootstrap/derived_allele_counts/derived_allele_counts_validated_subset.sh
+
+REGION=$1 #autosomes or Xchr
+CHUNK=$(printf "%02d" ${SGE_TASK_ID}) #chunk of parallelisation
+
+export PATH=$PATH:/share/apps/bedtools2/bin:/share/apps/est-sfs-release-2.03/:/share/apps/BAMTOOLS/bin:/share/apps/bedtools2/bin
+module load gcc/7.2.0
+module add gcc/7.2.0
+
+cd /share/rdata/ramon.pouso/bootstrap/
+
+echo "generating parallel derived allele counts for chunk" $CHUNK
+echo "retrieving blocks in chunk" $CHUNK
+BLOCKLIST=$(cut -d'.' -f1 derived_allele_counts/$REGION/block_list/block_list_${CHUNK}.txt)
+echo "retrieving pools"
+POOL_LIST=($(ls -v `find "/share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/pools_counts/gen0-140/key_categories" -name '*_gen0-140_pool.validated_subset_'${REGION}'.txt' -print`))
+for BLOCK in ${BLOCKLIST[@]}
+  do 
+  echo "working with block" ${BLOCK}
+  BED=$(readlink -f block_beds_${REGION}/${BLOCK}.bed)
+  rm derived_allele_counts/$REGION/block_counts/counts_pool_gen0-140_${REGION}_summary.validated_subset.${BLOCK}.txt
+  
+  #echo -e "sample\tgeneration\tfourfold_V\tfourfold_D\tfourfold_cov\ttolerated_V\ttolerated_D\ttolerated_cov\tdeleterious_V\tdeleterious_D\tdeleterious_cov\tLoF_V\tLoF_D\tLoF_cov" > derived_allele_counts/$REGION/block_counts/counts_pool_gen0-140_${REGION}_summary.validated_subset.${BLOCK}.txt
+  echo -e "sample\tgeneration\tfourfold_V\tfourfold_D\ttolerated_V\ttolerated_D\tdeleterious_V\tdeleterious_D\tLoF_V\tLoF_D" > derived_allele_counts/$REGION/block_counts/counts_pool_gen0-140_${REGION}_summary.validated_subset.${BLOCK}.txt
+  for pool in "${POOL_LIST[@]}"
+    do
+    echo "${pool}"
+    SAMPLE=$(echo "${pool}" | rev | cut -d'/' -f1 | rev | cut -d'_' -f1)
+    GEN=$(echo "${pool}" | rev | cut -d'/' -f1 | rev | cut -d'_' -f2)
+
+    echo "subsetting VCF for block" $BLOCK "and pool" $pool
+    bedtools intersect -a ${pool} -b ${BED} -header > ${pool/.txt/_derived_allele_counts.validated_subset.${BLOCK}.txt}
+    p=${pool/.txt/_derived_allele_counts.validated_subset.${BLOCK}.txt}
+    
+    FOURFOLD_V=$(grep "CUSTOM=fourfold;" $p | wc -l)
+    if [ "$FOURFOLD_V" -eq 0 ]
+      then 
+      FOURFOLD_A=0
+      FOURFOLD_D=0
+      #FOURFOLD_COV=0
+    else
+      FOURFOLD_A=$(grep "CUSTOM=fourfold;" $p | awk '{print $10}' | paste -sd+ | bc)
+      FOURFOLD_D=$(grep "CUSTOM=fourfold;" $p | awk '{print $11}' | paste -sd+ | bc)
+      #FOURFOLD_COV=$((FOURFOLD_A+FOURFOLD_D))
+    fi
+    
+    MISTOL_V=$(grep "CUSTOM=tolerated;" $p | wc -l)
+    if [ "$MISTOL_V" -eq 0 ]
+      then 
+      MISTOL_A=0
+      MISTOL_D=0
+      #MISTOL_COV=0
+    else
+      MISTOL_A=$(grep "CUSTOM=tolerated;" $p | awk '{print $10}' | paste -sd+ | bc)
+      MISTOL_D=$(grep "CUSTOM=tolerated;" $p | awk '{print $11}' | paste -sd+ | bc)
+      #MISTOL_COV=$((MISTOL_A+MISTOL_D))
+    fi
+
+    MISDEL_V=$(grep "CUSTOM=deleterious;" $p | wc -l)
+    if [ "$MISDEL_V" -eq 0 ]
+      then 
+      MISDEL_A=0
+      MISDEL_D=0
+      #MISDEL_COV=0
+    else
+      MISDEL_A=$(grep "CUSTOM=deleterious;" $p | awk '{print $10}' | paste -sd+ | bc)
+      MISDEL_D=$(grep "CUSTOM=deleterious;" $p | awk '{print $11}' | paste -sd+ | bc)
+      #MISDEL_COV=$((MISDEL_A+MISDEL_D))
+    fi
+
+    LOF_V=$(grep "CUSTOM=LoF;" $p | wc -l)
+    if [ "$LOF_V" -eq 0 ]
+      then 
+      LOF_A=0
+      LOF_D=0
+      #LOF_COV=0
+    else
+      LOF_A=$(grep "CUSTOM=LoF;" $p | awk '{print $10}' | paste -sd+ | bc)
+      LOF_D=$(grep "CUSTOM=LoF;" $p | awk '{print $11}' | paste -sd+ | bc)
+      #LOF_COV=$((LOF_A+LOF_D))
+    fi
+    #echo -e "$SAMPLE\t$GEN\t$FOURFOLD_V\t$FOURFOLD_D\t$FOURFOLD_COV\t$MISTOL_V\t$MISTOL_D\t$MISTOL_COV\t$MISDEL_V\t$MISDEL_D\t$MISDEL_COV\t$LOF_V\t$LOF_D\t$LOF_COV" >> derived_allele_counts/$REGION/block_counts/counts_pool_gen0-140_${REGION}_summary.validated_subset.${BLOCK}.txt
+    echo -e "$SAMPLE\t$GEN\t$FOURFOLD_V\t$FOURFOLD_D\t$MISTOL_V\t$MISTOL_D\t$MISDEL_V\t$MISDEL_D\t$LOF_V\t$LOF_D" >> derived_allele_counts/$REGION/block_counts/counts_pool_gen0-140_${REGION}_summary.validated_subset.${BLOCK}.txt
+    rm ${pool/.txt/_derived_allele_counts.validated_subset.${BLOCK}.txt}
+    done
+  done
+
+```
+
 #4. Generate the synthetic genomes:
 ###Autosomes or Xchr.
 ```{bash}
@@ -401,6 +500,29 @@ tail -n+2 /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/pools_counts/gen0-1
 
 ##Standard error: sqrt(variance(N)/N); we'll be using the N-1 version of the variance formula.
 cat pool_headers.txt <(paste pop_codes.txt <(cat <(gawk '!($1~/sample/) {N[$2]++; for (i=3;i<=NF;i++) {sum[$2"."i] += $i};} END {for (p in N) {printf "%s\t", p; for (i=3;i<NF;i++) printf("%.3f\t",0); printf("%.3f\n",0);}}' <(tail -n+2 /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/pools_counts/gen0-140/key_categories/counts_pool_gen0-140_${REGION}_summary.txt) | sort -t n -k2,2g) <(gawk '$1~/sample/ {N[$2]++; for (i=3;i<=NF;i++) {sum[$2","i] += $i; sumsq[$2","i]+=$i*$i;}} END {for (p in N) {printf "%s\t", p; for (i=3;i<NF;i++) printf("%.3f\t",(((sumsq[p","i]-sum[p","i]*sum[p","i]/N[p])/(N[p]-1))/N[p])**0.5); printf("%.3f\n",(((sumsq[p","NF]-sum[p","NF]*sum[p","NF]/N[p])/(N[p]-1))/N[p])**0.5); }}' <(tail -n+2 /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/pools_counts/gen0-140/key_categories/counts_pool_gen0-140_${REGION}_summary.txt)))) > /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/pools_counts/gen0-140/key_categories/counts_pool_gen0-140_${REGION}_average.empirerror.txt
+
+```
+
+####Valid SNPs subset:
+```{bash}
+
+REGION="autosomes" #autosomes or Xchr
+cd /share/rdata/ramon.pouso/bootstrap/derived_allele_counts/$REGION/block_counts/
+
+#First, generate some headers and info files (this should only be performed once):
+head -n1 <$(ls counts_pool_gen0-140_${REGION}_summary.bl*.txt | head -n1) > pool_headers.txt #Retrieve headers for files with pools
+printf 'Pb\n%.0s' {1..6} > pop_codes.txt #then generate the population column content
+printf 'lines\n%.0s' {1..2} >> pop_codes.txt
+tail -n+2 <$(ls counts_pool_gen0-140_${REGION}_summary.bl*.txt | head -n1) | cut -f-2 > pool_gen.txt #Retrieve first 2 columns with pool data
+
+#Next, obtain the population average and sampling error (standard error) for the empirical data
+##Average:
+cat pool_headers.txt <(paste pop_codes.txt <(cat <(gawk '!($1~/sample/) {N[$2]++; for (i=3;i<=NF;i++) {sum[$2"."i] += $i};} END {for (p in N) {printf "%s\t", p; for (i=3;i<NF;i++) printf("%.3f\t",sum[p"."i]/N[p]); printf("%.3f\n",sum[p"."NF]/N[p]);}}' <(tail -n+2 /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/pools_counts/gen0-140/key_categories/counts_pool_gen0-140_${REGION}_summary.validated_subset.txt) | sort -t n -k2,2g) <(gawk '$1~/sample/ {N[$2]++; for (i=3;i<=NF;i++) {sum[$2"."i] += $i};} END {for (p in N) {printf "%s\t", p; for (i=3;i<NF;i++) printf("%.3f\t",sum[p"."i]/N[p]); printf("%.3f\n",sum[p"."NF]/N[p]);}}' <(tail -n+2 /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/pools_counts/gen0-140/key_categories/counts_pool_gen0-140_${REGION}_summary.validated_subset.txt)))) > /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/pools_counts/gen0-140/key_categories/counts_pool_gen0-140_${REGION}_average.validated_subset.empirmean.txt
+
+tail -n+2 /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/pools_counts/gen0-140/key_categories/counts_pool_gen0-140_${REGION}_average.validated_subset.empirmean.txt | cut -f-2 > pop_gen.txt
+
+##Standard error: sqrt(variance(N)/N); we'll be using the N-1 version of the variance formula.
+cat pool_headers.txt <(paste pop_codes.txt <(cat <(gawk '!($1~/sample/) {N[$2]++; for (i=3;i<=NF;i++) {sum[$2"."i] += $i};} END {for (p in N) {printf "%s\t", p; for (i=3;i<NF;i++) printf("%.3f\t",0); printf("%.3f\n",0);}}' <(tail -n+2 /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/pools_counts/gen0-140/key_categories/counts_pool_gen0-140_${REGION}_summary.validated_subset.txt) | sort -t n -k2,2g) <(gawk '$1~/sample/ {N[$2]++; for (i=3;i<=NF;i++) {sum[$2","i] += $i; sumsq[$2","i]+=$i*$i;}} END {for (p in N) {printf "%s\t", p; for (i=3;i<NF;i++) printf("%.3f\t",(((sumsq[p","i]-sum[p","i]*sum[p","i]/N[p])/(N[p]-1))/N[p])**0.5); printf("%.3f\n",(((sumsq[p","NF]-sum[p","NF]*sum[p","NF]/N[p])/(N[p]-1))/N[p])**0.5); }}' <(tail -n+2 /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/pools_counts/gen0-140/key_categories/counts_pool_gen0-140_${REGION}_summary.validated_subset.txt)))) > /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/pools_counts/gen0-140/key_categories/counts_pool_gen0-140_${REGION}_average.validated_subset.empirerror.txt
 
 ```
 
@@ -508,6 +630,28 @@ awk 'BEGIN {OFS = "\t"} NR == 1 {cols = split($0,m);next} NF == cols {for (i=1; 
 ##Bootstrap corrected errors divided by the empirical Kirov population average:
 cat pop_headers.txt <(paste pops.txt <(cat <(grep 'ki' ../../../${CALLING}_ann_population_average_${VAR}_${TYPE}.empirmean.txt | cut -f2-) <(tail -n+2 ${CALLING}_ann_population_average_${VAR}_${TYPE}.booterrorcorrected.txt | cut -f2-) | column -t |
 awk 'BEGIN {OFS = "\t"} NR == 1 {cols = split($0,m);next} NF == cols {for (i=1; i<=NF; i++) $i = sprintf ("%.5f", $i/m[i])}1')) > ${CALLING}_ann_population_average_${VAR}_${TYPE}.booterrorcorrected_ki_rel.txt
+
+```
+
+###Synthetic genomes counts (valid SNP subset):
+```{bash}
+
+N_BOOT=1000 #100 #1000
+mkdir -p /share/rdata/ramon.pouso/bootstrap/derived_allele_counts/whole-genome/
+cd /share/rdata/ramon.pouso/bootstrap/derived_allele_counts/
+
+#Next, generate several bootstrapped w-g counts by adding the counts of 1090 autosomal and 235 Xchr blocks pulled at random from the pool, and obtain the population averages:
+for boot in $(seq 1 $N_BOOT) #100 (4mins) #1000
+  do
+  #Autosomes:
+  cd /share/rdata/ramon.pouso/bootstrap/derived_allele_counts/autosomes/block_counts/
+  ##First, edit the filenames of the input blocks so that they match the current variables:
+  echo "generating autosomal counts for bootstrapped genome number" $boot
+  sed -e 's/^/counts_pool_gen0-140_autosomes_summary.validated_subset./' /share/rdata/ramon.pouso/bootstrap/bootstrapped_genomes_coordinates/bootstrapped_genome_autosomes_${boot}.list > bootstrapped_genome_autosomes_${boot}.validated_subset.list
+  ##Next, generate the counts for each bootstrapped genome:
+  paste pool_gen.txt <(awk '{for (i=3;i<=NF;i++) total[FNR","i]+=$i;} END{for (j=1;j<=FNR;j++) {for (i=3;i<=NF;i++) printf "%s\t",total[j","i]; print "";}}' $(cat bootstrapped_genome_autosomes_${boot}.validated_subset.list) | tail -n+2) > counts_pool_gen0-140_autosomes_summary.validated_subset.boot_${boot}.txt
+  cat <(gawk '!($1~/sample/) {N[$2]++; for (i=3;i<=NF;i++) {sum[$2"."i] += $i};} END {for (p in N) {printf "%s\t", p; for (i=3;i<NF;i++) printf("%.9f\t",sum[p"."i]/N[p]); printf("%.9f\n",sum[p"."NF]/N[p]);}}' counts_pool_gen0-140_autosomes_summary.validated_subset.boot_${boot}.txt | sort -t n -k2,2g) <(gawk '$1~/sample/ {N[$2]++; for (i=3;i<=NF;i++) {sum[$2"."i] += $i};} END {for (p in N) {printf "%s\t", p; for (i=3;i<NF;i++) printf("%.9f\t",sum[p"."i]/N[p]); printf("%.9f\n",sum[p"."NF]/N[p]);}}' counts_pool_gen0-140_autosomes_summary.validated_subset.boot_${boot}.txt) > counts_pool_gen0-140_autosomes_average.validated_subset.boot_${boot}.txt
+  done
 
 ```
 
