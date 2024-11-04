@@ -48,7 +48,7 @@ vcftools --vcf $vcf --plink --out ${vcf/.plink.vcf/} --chrom-map /share/rdata2/d
 
 ```
 
-##Filter the autosomal ones by A8, and moved them to the correct folders.
+##Filter the autosomal ones by A8, and move them to the correct folders.
 ```{bash}
 
 #First re-sort the A8 map file:
@@ -259,7 +259,7 @@ bedtools subtract -a $VCF -b /share/rdata/ramon.pouso/reference/indexed_referenc
 echo "removing INDELs, monomorphic and multiallelic SNPs, plus SNPs close to INDELs"
 bcftools filter -e 'AC==0 || AC==AN' --SnpGap 10 ${VCF/.vcf/.masked.vcf} | bcftools view -m2 -M2 -v snps -O v -o ${VCF/.vcf/.masked.bcf_filtered.vcf}
 
-#Remove low- and high-depth SNPs.
+#Remove and high-depth SNPs.
 DP_AVG=$(grep -v '^#' ${VCF/.vcf/.masked.bcf_filtered.vcf} | cut -f8 | awk -F";DP=|;ExcessHet" '{printf ("%s\n",$2)}' | awk '{sum+=$1}END{print sum/NR}')
 DP_SD=$(grep -v '^#' ${VCF/.vcf/.masked.bcf_filtered.vcf} | cut -f8 | awk -F";DP=|;ExcessHet" '{printf ("%s\n",$2)}' | awk '{sum+=$1; sumsq+=$1*$1}END{print sqrt(sumsq/NR - (sum/NR)**2)}')
 DP_AVG_PLUS_SD=$(bc -l <<< "$DP_AVG+3*$DP_SD")
@@ -462,6 +462,3 @@ grep -Ev "refGene=stop|refGene=nonsynonymous" $VCF > ${VCF/.vcf/.without_deleter
 bedtools intersect -a ${VCF/.vcf/.without_deleterious.vcf} -b /share/rdata2/dani_k/seleccion_fondo/tracks/exclusion_tracks_combined.bed -header > ${VCF/.vcf/.without_deleterious.tracks_excluded.vcf} #Autosomes: 688835; Xchr: 82807
 
 ```
-
-
-
