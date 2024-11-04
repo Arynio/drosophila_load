@@ -230,3 +230,47 @@ rm Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.bcftools_merge.list
 awk '$1=="X"' /share/rdata/ramon.pouso/polarisation/estsfs/output/final_snp_set.orthologs.sum_gen0_gen20_gen30_allele_counts.extrapolated_to_100.ancestral_vs_derived_complete.confident.rate6.pval.bed | bedtools intersect -a Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.vcf -b stdin -header > Alllines-Allcomb_xhap_genotyped_snps_masked_hf_pass.final_snp_set.vcf
 
 ```
+
+#Obtain bed files to filter the ped and map for GONE:
+##Annotate the VCF:
+###Non-redundant version.
+```{R, engine='bash'}
+
+module load annovar/4.19
+module load gcc/7.2.0 
+module add gcc/7.2.0 
+
+
+cd /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants
+FILE=Pb-B-ALL_merged_snps_excised_autosomic.vcf
+
+table_annovar.pl $FILE /share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/nr_reference_dm6 -vcfinput --outfile ${FILE/.vcf/.nr_annovar} -buildver dm6nr --protocol refGene --operation g
+
+```
+
+###Generate bed files:
+```{R, engine='bash'}
+
+module load gcc/7.2.0 
+module add gcc/7.2.0 
+
+
+cd /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants
+FILE=Pb-B-ALL_merged_snps_excised_autosomic.nr_annovar.dm6nr_multianno.vcf
+
+#Check all annotation categories:
+grep -v '^#' $FILE | awk -F ";Func\\\\.refGene=|;Gene\\\\.refGene=" '{printf ("%s\n",$2)}' | sort -u | less -S
+
+#Check all annotation categories:
+grep -v '^#' $FILE | awk -F ";ExonicFunc\\\\.refGene=|;AAChange\\\\.refGene=" '{printf ("%s\n",$2)}' | sort -u | less -S
+
+#Obtain intergenic bed:
+grep -v '^#' $FILE | grep -E ';Func.refGene=intergenic;Gene.refGene=' | awk '{printf ("%s\t%s\t%s\n",$1,$2-1,$2)}' > Pb-B-ALL_merged_snps_excised_autosomic.nr_annovar.dm6nr_multianno.intergenic.bed #in the end this isn't the one that we applied. Instead we used exclusion_tracks_combined.bed from the "background_selection_analysis.Rmd" script.
+
+#Obtain UTR3 & UTR5 bed:
+grep -v '^#' $FILE | grep -E ';Func.refGene=UTR3;|;Func.refGene=UTR5;|;Func.refGene=UTR5\x3bUTR3;' | awk '{printf ("%s\t%s\t%s\n",$1,$2-1,$2)}' > Pb-B-ALL_merged_snps_excised_autosomic.nr_annovar.dm6nr_multianno.UTR.bed
+
+#Obtain missense and LoF bed:
+grep -v '^#' $FILE | grep -E ';ExonicFunc.refGene=nonsynonymous_SNV;|;ExonicFunc.refGene=stopgain;|;ExonicFunc.refGene=stoploss;' | awk '{printf ("%s\t%s\t%s\n",$1,$2-1,$2)}' > Pb-B-ALL_merged_snps_excised_autosomic.nr_annovar.dm6nr_multianno.missense_and_LoF.bed
+
+```
