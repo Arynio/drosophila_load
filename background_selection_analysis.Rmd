@@ -5,7 +5,8 @@ date: "2024-03-25"
 ---
 
 #0. Prepare ped and map files.
-##Populations in the experiment by Irene:
+##TFG:
+###Populations in the experiment by Irene:
 ```{bash}
 
 cd /DATA/rdata2/DROSOHILA_FICHEROS/
@@ -24,7 +25,21 @@ comm -12 array_snp_A8_sorted.txt array_snp_PB17-1_sorted.txt > intersecting_snps
 awk '{print $1, $2, $2, NR}' intersecting_snps_PB17-1_A8.txt > intersecting_ranges_PB17-1_A8.txt
 ./plink1.9 --file PB17-1 --extract range intersecting_ranges_PB17-2_A8.txt --make-bed --recode --out PB17-1-A8
 
-#However, the files in BOT_EXPAN are not filtered by A8.
+#However, the files in BOT_EXPAN are not filtered by A8. To do so:
+cd /share/rdata2/dani_k/seleccion_fondo/plink/BOT_EXPAN
+##For autosomes:
+#awk '{print $1, $4}' /share/rdata2/dani_k/seleccion_fondo/plink/BOT/A8.map | sort > /share/rdata2/dani_k/seleccion_fondo/plink/BOT/array_snp_A8_sorted.txt
+awk '{print $1, $4}' A60.map | sort > array_snp_A60_sorted.txt
+comm -12 /share/rdata2/dani_k/seleccion_fondo/plink/BOT/array_snp_A8_sorted.txt array_snp_A60_sorted.txt > intersecting_snps_A60_A8.txt
+awk '{print $1, $2, $2, NR}' intersecting_snps_A60_A8.txt > intersecting_ranges_A60_A8.txt
+/share/rdata2/dani_k/seleccion_fondo/plink/plink --file A60 --extract range intersecting_ranges_A60_A8.txt --make-bed --recode --out A60-A8
+##For Xchr:
+!!!IT DOESNT WORK!
+awk '{print $1, $4}' /share/rdata2/dani_k/seleccion_fondo/plink/BOT/A8X.map | sort > /share/rdata2/dani_k/seleccion_fondo/plink/BOT/array_snp_A8X_sorted.txt
+awk '{print $1, $4}' A60X.map | sort > array_snp_A60X_sorted.txt
+comm -12 /share/rdata2/dani_k/seleccion_fondo/plink/BOT/array_snp_A8X_sorted.txt array_snp_A60X_sorted.txt > intersecting_snps_A60X_A8.txt
+awk '{print $1, $2, $2, NR}' intersecting_snps_A60X_A8.txt > intersecting_ranges_A60X_A8.txt
+/share/rdata2/dani_k/seleccion_fondo/plink/plink --file A60X --extract range intersecting_ranges_A60X_A8.txt --make-bed --recode --out A60X-A8
 
 #Copy the files to my folder:
 mkdir /share/rdata2/dani_k/seleccion_fondo/plink
@@ -32,8 +47,8 @@ scp -pr . /share/rdata2/dani_k/seleccion_fondo/plink/
 
 ```
 
-##Lines from the slow inbreeding experiment:
-##Generate ped and map for each vcf.
+###Lines from the slow inbreeding experiment:
+####Generate ped and map for each vcf.
 ```{bash}
 
 #I already generated ped and map files previously for GONE, but the code has been lost. To generate them, I used the following vcf files for each $pop:
@@ -48,7 +63,7 @@ vcftools --vcf $vcf --plink --out ${vcf/.plink.vcf/} --chrom-map /share/rdata2/d
 
 ```
 
-##Filter the autosomal ones by A8, and move them to the correct folders.
+####Filter the autosomal ones by A8, and move them to the correct folders.
 ```{bash}
 
 #First re-sort the A8 map file:
@@ -77,7 +92,7 @@ for pop in ${LINES[@]}
 
 ```
 
-##Copy the Xchr ones to the correct folders, and add the map distances.
+####Copy the Xchr ones to the correct folders, and add the map distances.
 ```{bash}
 
 cd /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/
@@ -98,9 +113,119 @@ for pop in ${LINES[@]}
   awk '{print $1, $2, $2, NR}' x_intersecting_snps_L"${pop}"_Pb-B.txt > x_intersecting_ranges_L"${pop}"_Pb-B.txt
   rm /share/rdata2/dani_k/seleccion_fondo/plink/L"${pop}"/L"${pop}"_Pb-B*
   /share/rdata2/dani_k/seleccion_fondo/plink/plink --file L"${pop}"-Allcomb_xhap_genotyped_snps_masked_hf_pass.corrected --extract range x_intersecting_ranges_L"${pop}"_Pb-B.txt --make-bed --recode --out /share/rdata2/dani_k/seleccion_fondo/plink/L"${pop}"/L"${pop}"_X_Pb-B
-  bedtools intersect -a <(awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\n", $1,$4-1,$4,$2,$3)}' L"${pop}"-Allcomb_xhap_genotyped_snps_masked_hf_pass.corrected.map) -b <(awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\n", $1,$4-1,$4,$2,$3)}' /share/rdata2/dani_k/seleccion_fondo/plink/genetic_map/Pb-B-ALL_merged_snps_final_X.map) -wa -wb | awk -F"\t" '{printf ("%s\t%s\t%s\t%s\n", $1,$4,$10,$2)}' > /share/rdata2/dani_k/seleccion_fondo/plink/L"${pop}"/L"${pop}"_X_Pb-B.map.bis
+  bedtools intersect -a <(awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\n", $1,$4-1,$4,$2,$3)}' L"${pop}"-Allcomb_xhap_genotyped_snps_masked_hf_pass.corrected.map) -b <(awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\n", $1,$4-1,$4,$2,$3)}' /share/rdata2/dani_k/seleccion_fondo/plink/genetic_map/Pb-B-ALL_merged_snps_final_X.map) -wa -wb | awk -F"\t" '{printf ("%s\t%s\t%s\t%s\n", $1,$4,$10,$3)}' > /share/rdata2/dani_k/seleccion_fondo/plink/L"${pop}"/L"${pop}"_X_Pb-B.map.bis
   mv /share/rdata2/dani_k/seleccion_fondo/plink/L"${pop}"/L"${pop}"_X_Pb-B.map.bis /share/rdata2/dani_k/seleccion_fondo/plink/L"${pop}"/L"${pop}"_X_Pb-B.map
   done
+
+```
+
+##TFM:
+###Prepare filtering file:
+```{bash}
+
+module load gcc/7.2.0 
+module add gcc/7.2.0 
+
+mkdir -p /share/rdata2/dani_k/seleccion_fondo/TFM/
+cd /share/rdata2/dani_k/seleccion_fondo/TFM/
+
+#Combine all desired exclusion tracks (Humberto chose them) into a single one:
+cat /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Pb-B-ALL_merged_snps_excised_autosomic.nr_annovar.dm6nr_multianno.missense_and_LoF.bed /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Pb-B-ALL_merged_snps_excised_autosomic.nr_annovar.dm6nr_multianno.UTR.bed <(cut -f-3 /share/rdata2/dani_k/seleccion_fondo/tracks/phastCons_exclude_regions.bed) | sortBed | mergeBed | sed -e 's/^2L/1/g' -e 's/^2R/2/g' -e 's/^3L/3/g' -e 's/^3R/4/g' -e 's/^X/5/g' > exclude_phastCons_UTR_missense_LoF.bed
+
+#Tranform it into a 1-based .txt file that includes row numbers, which is what plink needs:
+sort exclude_phastCons_UTR_missense_LoF.bed | awk '{print $1, $2+1, $3, NR}' > exclude_phastCons_UTR_missense_LoF.txt
+
+```
+
+###Filter the plink files:
+####Populations in the experiment by Irene:
+```{bash}
+
+module load gcc/7.2.0 
+module add gcc/7.2.0 
+
+#Copy the files to the working directory:
+cd /share/rdata2/dani_k/seleccion_fondo/TFM/
+scp -p /share/rdata2/datos_procesados/mapped/* ./ #Humberto put the .ped and .map files in this folder.
+
+#Filter the files:
+FILE=$(ls *.ped | cut -d'.' -f1)
+for file in ${FILE[@]}
+  do
+  /share/rdata2/dani_k/seleccion_fondo/plink/plink --file $file --exclude range exclude_phastCons_UTR_missense_LoF.txt --make-bed --recode --out ${file}_filtered
+  done
+
+#Fix the genetic distances:
+##For autosomes:
+MAP_FILES=$(ls *_filtered.map | grep -v 'chrX')
+for map in ${MAP_FILES[@]}
+  do
+  awk '{printf ("%s\t%s\t%s\t%s\n",$1, $2, $3/2, $4)}' $map > ${map/.map/.mod.map} && mv ${map/.map/.mod.map} $map
+  done
+##For the Xchr:
+MAP_FILES=$(ls *_filtered.map | grep 'chrX')
+for map in ${MAP_FILES[@]}
+  do
+  awk '{printf ("%s\t%s\t%s\t%s\n",$1, $2, $3*2/3, $4)}' $map > ${map/.map/.mod.map} && mv ${map/.map/.mod.map} $map
+  done
+
+#Copy the files to the destination folder using invitado1:
+mkdir -p /home/invitado1/TFG_YOUSSEF_DATOS_REALES
+scp -p /share/rdata2/dani_k/seleccion_fondo/TFM/*_filtered.ped /home/invitado1/TFG_YOUSSEF_DATOS_REALES/
+scp -p /share/rdata2/dani_k/seleccion_fondo/TFM/*_filtered.map /home/invitado1/TFG_YOUSSEF_DATOS_REALES/
+
+#Rename them using ivitado1:
+cd /home/invitado1/TFG_YOUSSEF_DATOS_REALES
+FILES=$(ls *_chrX_filtered*)
+for f in ${FILES[@]}; do mv $f ${f/_filtered/}; done
+FILES=$(ls *_filtered*)
+for f in ${FILES[@]}; do mv $f ${f/_filtered/_autosomes}; done
+
+```
+
+####Lines from the slow inbreeding experiment:
+```{bash}
+
+module load bcftools/1.9
+module load gcc/7.2.0
+module add gcc/7.2.0
+
+##For autosomes:
+LINES=$(bcftools query -l /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Alllinesonly-Allcomb_autohap_genotyped_snps_masked_hf_pass.vcf | cut -c 2-3 | sort -u)
+for pop in ${LINES[@]}
+  do
+  echo "${pop}"
+  cd /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/linea_"${pop}"/dani/
+  #Filter the files:
+  /share/rdata2/dani_k/seleccion_fondo/plink/plink --file L"${pop}"-Allcomb_autohap_genotyped_snps_masked_hf_pass --exclude range /share/rdata2/dani_k/seleccion_fondo/TFM/exclude_phastCons_UTR_missense_LoF.txt --make-bed --recode --out L"${pop}"-Allcomb_autohap_genotyped_snps_masked_hf_pass_filtered
+  #Add proper genetic distances:
+  bedtools intersect -a <(awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\n", $1,$4-1,$4,$2,$3)}' L"${pop}"-Allcomb_autohap_genotyped_snps_masked_hf_pass_filtered.map) -b <(awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\n", $1,$4-1,$4,$2,$3/2)}' /share/rdata2/dani_k/seleccion_fondo/plink/genetic_map/Pb-B-ALL_merged_snps_final_autosomic.map) -wa -wb | awk -F"\t" '{printf ("%s\t%s\t%s\t%s\n", $1,$4,$10,$3)}' > L"${pop}"-Allcomb_autohap_genotyped_snps_masked_hf_pass_filtered.map.bis
+  mv L"${pop}"-Allcomb_autohap_genotyped_snps_masked_hf_pass_filtered.map.bis L"${pop}"-Allcomb_autohap_genotyped_snps_masked_hf_pass_filtered.map
+  done
+##For the Xchr:
+LINES=$(bcftools query -l /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Alllinesonly-Allcomb_autohap_genotyped_snps_masked_hf_pass.vcf | cut -c 2-3 | sort -u)
+for pop in ${LINES[@]}
+  do
+  echo "${pop}"
+  cd /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/linea_"${pop}"/dani/
+  #Filter the files:
+  /share/rdata2/dani_k/seleccion_fondo/plink/plink --file L"${pop}"-Allcomb_xhap_genotyped_snps_masked_hf_pass.corrected --exclude range /share/rdata2/dani_k/seleccion_fondo/TFM/exclude_phastCons_UTR_missense_LoF.txt --make-bed --recode --out L"${pop}"-Allcomb_xhap_genotyped_snps_masked_hf_pass_filtered
+  #Add proper genetic distances:
+  bedtools intersect -a <(awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\n", $1,$4-1,$4,$2,$3)}' L"${pop}"-Allcomb_xhap_genotyped_snps_masked_hf_pass_filtered.map) -b <(awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\n", $1,$4-1,$4,$2,$3*2/3)}' /share/rdata2/dani_k/seleccion_fondo/plink/genetic_map/Pb-B-ALL_merged_snps_final_X.map) -wa -wb | awk -F"\t" '{printf ("%s\t%s\t%s\t%s\n", $1,$4,$10,$3)}' > L"${pop}"-Allcomb_xhap_genotyped_snps_masked_hf_pass_filtered.map.bis
+  mv L"${pop}"-Allcomb_xhap_genotyped_snps_masked_hf_pass_filtered.map.bis L"${pop}"-Allcomb_xhap_genotyped_snps_masked_hf_pass_filtered.map
+  done
+
+#Copy the files to the destination folder using invitado1:
+mkdir -p /home/invitado1/TFG_YOUSSEF_DATOS_REALES
+scp -pr /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/linea_*/dani/*_filtered.ped /home/invitado1/TFG_YOUSSEF_DATOS_REALES/
+scp -pr /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/linea_*/dani/*_filtered.map /home/invitado1/TFG_YOUSSEF_DATOS_REALES/
+
+#Rename them using ivitado1:
+cd /home/invitado1/TFG_YOUSSEF_DATOS_REALES
+FILES=$(ls L*autohap*)
+for f in ${FILES[@]}; do mv $f ${f/-Allcomb_autohap_genotyped_snps_masked_hf_pass_filtered/_autosomes}; done
+FILES=$(ls L*xhap*)
+for f in ${FILES[@]}; do mv $f ${f/-Allcomb_xhap_genotyped_snps_masked_hf_pass_filtered/_chrX}; done
 
 ```
 
