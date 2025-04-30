@@ -1,0 +1,1171 @@
+---
+title: "slow_inbreeding_two_parsimony"
+output: html_document
+date: "2025-03-31"
+---
+
+
+#README.
+```{bash}
+
+#This script is a branch of the "all_sites_pipeline.Rmd" starting with the polarisation section. Here we'll carry a simple parsimony-based polarisation.
+
+```
+
+#5. Two parsimony polarisation.
+##Extract outgroup state:
+```{R, engine='bash'}
+
+VCF=/share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.vcf
+
+module load gcc/7.2.0
+module add gcc/7.2.0
+
+#Extract the outgroup state for sites in the final VCF:
+##Simulans:
+cd /share/rdata/ramon.pouso/outgroups/simulans/3processed
+bedtools getfasta -fi bwa_simulans_iso_rmdup_mq30_rg_multirealigned_major.fasta -bed <(grep -v '^#' $VCF | awk -F "\t" '{printf ("%s\t%s\t%s\n", $1,$2-1,$2)}') -tab > bwa_simulans_iso_rmdup_mq30_rg_multirealigned_major.slow_inbreeding_variants.txt
+awk -F"\t|:|-" '{printf ("%s\t%s\t%s\t%s\n", $1,$2,$3,$4)}' bwa_simulans_iso_rmdup_mq30_rg_multirealigned_major.slow_inbreeding_variants.txt > bwa_simulans_iso_rmdup_mq30_rg_multirealigned_major.slow_inbreeding_variants.bed
+##Yakuba:
+cd /share/rdata/ramon.pouso/outgroups/yakuba/3processed
+bedtools getfasta -fi bwa_yakuba_iso_rmdup_mq30_rg_multirealigned_major.fasta -bed <(grep -v '^#' $VCF | awk -F "\t" '{printf ("%s\t%s\t%s\n", $1,$2-1,$2)}') -tab > bwa_yakuba_iso_rmdup_mq30_rg_multirealigned_major.slow_inbreeding_variants.txt
+awk -F"\t|:|-" '{printf ("%s\t%s\t%s\t%s\n", $1,$2,$3,$4)}' bwa_yakuba_iso_rmdup_mq30_rg_multirealigned_major.slow_inbreeding_variants.txt > bwa_yakuba_iso_rmdup_mq30_rg_multirealigned_major.slow_inbreeding_variants.bed
+
+#Combine info from both outgroups:
+cd /share/rdata/ramon.pouso/outgroups/
+bedtools intersect -a /share/rdata/ramon.pouso/outgroups/simulans/3processed/bwa_simulans_iso_rmdup_mq30_rg_multirealigned_major.slow_inbreeding_variants.bed -b /share/rdata/ramon.pouso/outgroups/yakuba/3processed/bwa_yakuba_iso_rmdup_mq30_rg_multirealigned_major.slow_inbreeding_variants.bed -wa -wb | awk -F "\t" '{printf ("%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$8)}' > bwa_simulans_yakuba_iso_rmdup_mq30_rg_multirealigned_major.slow_inbreeding_variants.bed
+
+#Keep only sites that match between the two species:
+awk -F "\t" '($4==$5) {print $0}' bwa_simulans_yakuba_iso_rmdup_mq30_rg_multirealigned_major.slow_inbreeding_variants.bed > bwa_simulans_yakuba_iso_rmdup_mq30_rg_multirealigned_major.slow_inbreeding_variants.simulans_yakuba_match.bed
+
+#Exclude sites with no info (N):
+awk -F "\t" '($4!="N") {print $0}' bwa_simulans_yakuba_iso_rmdup_mq30_rg_multirealigned_major.slow_inbreeding_variants.simulans_yakuba_match.bed > bwa_simulans_yakuba_iso_rmdup_mq30_rg_multirealigned_major.slow_inbreeding_variants.simulans_yakuba_match_woutN.bed
+
+#Keep only those sites which are inconsistent between the outgroup state and the REF state from the VCF (i.e., those for which the REF allele in the VCF does not match the ancestral state), and at the same time consistent with the ALT state (i.e., otherwise we're dealing with sites that are triallelic across the outgroups plus the focal species):
+bedtools intersect -a bwa_simulans_yakuba_iso_rmdup_mq30_rg_multirealigned_major.slow_inbreeding_variants.simulans_yakuba_match_woutN.bed -b <(grep -v '^#' $VCF | awk -F "\t" '{printf ("%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$4,$5)}') -wa -wb | awk -F "\t" '($4!=$9 && $4==$10) {printf ("%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$9)}' > bwa_simulans_yakuba_iso_rmdup_mq30_rg_multirealigned_major.slow_inbreeding_variants.simulans_yakuba_match_woutN.ref_inconsistent.bed #Column #4 in this file will be the ANC allele, and column #5 the REF allele.
+
+```
+
+##Generate ancestral state fasta reference.
+###Transform reference fasta to tab format:
+```{bash}
+
+cd /share/rdata/ramon.pouso/reference/indexed_reference/
+
+#Transform fasta to tab (not really tab separated, only the last column) format to ease the editing.
+/share/rdata/ramon.pouso/seqkit fx2tab dmel-all-chromosome-r6.14.fasta > dmel-all-chromosome-r6.14.tab
+
+```
+
+###slow_inbreeding_two_parsimony_ancestral_fasta.sh
+```{bash}
+
+#Run it as follows: qsub -cwd -l h=compute-0-9 -t 1-5 /share/rdata/ramon.pouso/reference/indexed_reference/slow_inbreeding_two_parsimony_ancestral_fasta.sh
+
+cd /share/rdata/ramon.pouso/reference/indexed_reference/
+
+#Retrieve scaffold corresponding to the current array level:
+CHROMOSOME=`sed -n ${SGE_TASK_ID}p <(cut -f1 /share/rdata/ramon.pouso/outgroups/bwa_simulans_yakuba_iso_rmdup_mq30_rg_multirealigned_major.slow_inbreeding_variants.simulans_yakuba_match_woutN.ref_inconsistent.bed | sort | uniq)`
+
+#Generate input files:
+##Bed with to-change alleles for the scaffold:
+echo "generating input file for chromosome" $CHROMOSOME
+awk -v chr=$CHROMOSOME '$1==chr' /share/rdata/ramon.pouso/outgroups/bwa_simulans_yakuba_iso_rmdup_mq30_rg_multirealigned_major.slow_inbreeding_variants.simulans_yakuba_match_woutN.ref_inconsistent.bed > /share/rdata/ramon.pouso/outgroups/bwa_simulans_yakuba_iso_rmdup_mq30_rg_multirealigned_major.slow_inbreeding_variants.simulans_yakuba_match_woutN.ref_inconsistent.chr${CHROMOSOME}.bed
+##Tab-reference for the scaffold:
+grep -w "ID=$CHROMOSOME;" dmel-all-chromosome-r6.14.tab > ${CHROMOSOME}.slow_inbreeding_two_parsimony_ancestral-r6.14.tab
+
+#Next, edit the melano fasta in order to generate the ancestral fasta:
+##First loop over the inconsistent variants (those for which the polarisation is the reverse), grep the scaffold which they belong to, edit the base, and use that file as the input for the next variant in the same scaffold:
+COUNTER=0
+TOTAL=$(wc -l < /share/rdata/ramon.pouso/outgroups/bwa_simulans_yakuba_iso_rmdup_mq30_rg_multirealigned_major.slow_inbreeding_variants.simulans_yakuba_match_woutN.ref_inconsistent.chr${CHROMOSOME}.bed)
+echo "editing fasta for chromosome" $CHROMOSOME
+while read -r SCAFFOLD START STOP ANCESTRAL REFERENCE; do
+  #Print the sequence replacing only the current variant, and replace the previous input with this output:
+  awk -v stop=$STOP -v ancestral=$ANCESTRAL -F"\t" '{printf ("%s\t%s%s%s\n", $1,substr($2,1,stop-1),ancestral,substr($2,stop+1))}' $SCAFFOLD.slow_inbreeding_two_parsimony_ancestral-r6.14.tab > $SCAFFOLD.tmp && mv $SCAFFOLD.tmp $SCAFFOLD.slow_inbreeding_two_parsimony_ancestral-r6.14.tab
+  ((COUNTER++))
+  if [ $(( $COUNTER % 500 )) == 0 ]
+    then
+    echo "processed $COUNTER sites out of $TOTAL"
+  fi
+ done < /share/rdata/ramon.pouso/outgroups/bwa_simulans_yakuba_iso_rmdup_mq30_rg_multirealigned_major.slow_inbreeding_variants.simulans_yakuba_match_woutN.ref_inconsistent.chr${CHROMOSOME}.bed
+touch chr${CHROMOSOME}.finished
+echo "finished processing chromosome" $CHROMOSOME
+
+```
+
+###Combine all scaffolds back into the ancestral fasta:
+```{bash}
+
+cd /share/rdata/ramon.pouso/reference/indexed_reference/
+#Check if the editing of the last scaffold is now complete, and if so, append all scaffolds to generate the new ancestral file (containing only the modified scaffolds).
+if [ $(ls chr*.finished | wc -l) == 5 ]
+  then
+  cat *.slow_inbreeding_two_parsimony_ancestral-r6.14.tab > slow_inbreeding_two_parsimony_ancestral-all-chromosome-r6.14.tab
+  else
+  echo "keep waiting"
+fi
+#rm chr*.finished
+#rm *.slow_inbreeding_two_parsimony_ancestral-r6.14.tab
+
+#Next, include all the other scaffolds, i.e. those that remained unchanged:
+grep -v -w -f <(cat *.slow_inbreeding_two_parsimony_ancestral-r6.14.tab | cut -d' ' -f1 | awk '{print "ID="$0";"}') dmel-all-chromosome-r6.14.tab | awk -F"\t" '{printf ("%s\t%s\n", $1,$2)}' >> slow_inbreeding_two_parsimony_ancestral-all-chromosome-r6.14.tab #Check that it has 1870 lines, same as dmel-all-chromosome-r6.14.tab
+
+#Next convert the file back to fasta format:
+/share/rdata/ramon.pouso/seqkit tab2fx <(awk -F"\t| " '{printf ("%s\t%s\n",$1,$10)}' slow_inbreeding_two_parsimony_ancestral-all-chromosome-r6.14.tab) > slow_inbreeding_two_parsimony_ancestral-all-chromosome-r6.14.fa
+
+#Finally, obtain the (bgzip) compressed version of the fasta, and its index file:
+module load samtools/1.4.1 
+/DATA/APPS/freebayes/25.03.19/SeqLib/htslib/bgzip -c slow_inbreeding_two_parsimony_ancestral-all-chromosome-r6.14.fa > slow_inbreeding_two_parsimony_ancestral-all-chromosome-r6.14.fa.gz
+samtools faidx slow_inbreeding_two_parsimony_ancestral-all-chromosome-r6.14.fa.gz
+
+
+#Chech if it worked fine. Cols 3 and 4 should be identical, and different from cols 5 and 6, which should also be the same:
+rm kaka.borrar
+while read -r SCAFFOLD START STOP ANCESTRAL REFERENCE; do
+  OLD=$(grep "ID=$SCAFFOLD;" dmel-all-chromosome-r6.14.tab | awk -F"\t" '{printf ("%s\n", $2)}' | cut -c$STOP)
+  NEW=$(grep "$SCAFFOLD" slow_inbreeding_two_parsimony_ancestral-all-chromosome-r6.14.tab | awk -F"\t" '{printf ("%s\n", $2)}' | cut -c$STOP)
+  echo -e "$SCAFFOLD\t$STOP\t$REFERENCE\t$OLD\t$ANCESTRAL\t$NEW" >> kaka.borrar
+ done < /share/rdata/ramon.pouso/outgroups/bwa_simulans_yakuba_iso_rmdup_mq30_rg_multirealigned_major.slow_inbreeding_variants.simulans_yakuba_match_woutN.ref_inconsistent.bed
+#Seems like all key positions have changed correctly, while random ones are still the same.
+
+```
+
+###Index the ancestral state fasta reference.
+```{bash}
+
+cd /share/rdata/ramon.pouso/reference/indexed_reference/
+module load samtools/1.4.1
+
+samtools faidx slow_inbreeding_two_parsimony_ancestral-all-chromosome-r6.14.fa
+samtools dict slow_inbreeding_two_parsimony_ancestral-all-chromosome-r6.14.fa -o slow_inbreeding_two_parsimony_ancestral-all-chromosome-r6.14.dict
+
+```
+
+##Carry out the VCF polarisation.
+###Filter polarisable sites:
+```{bash}
+
+VCF=crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.vcf
+
+module load gcc/7.2.0
+module add gcc/7.2.0
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/
+
+#Keep only SNPs with available ancestral inference.
+bedtools intersect -a $VCF -b /share/rdata/ramon.pouso/outgroups/bwa_simulans_yakuba_iso_rmdup_mq30_rg_multirealigned_major.slow_inbreeding_variants.simulans_yakuba_match_woutN.bed -header > ${VCF/.vcf/.two_parsimony_polarisable.vcf}
+
+```
+
+###Fill the ancestral allele data:
+```{bash}
+
+#Code to annotate the AA (ancestral alleles) subfield from the INFO field in the VCF.
+module load vcftools/0.1.17 
+module load samtools/1.4.1 
+export PERL5LIB=/DATA/APPS/vcftools/0.1.17/lib/site_perl/5.24.1/
+VCF=/share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.vcf
+
+cat ${VCF/.vcf/.two_parsimony_polarisable.vcf} | fill-aa -a /share/rdata/ramon.pouso/reference/indexed_reference/slow_inbreeding_two_parsimony_ancestral-all-chromosome-r6.14.fa.gz > ${VCF/.vcf/.two_parsimony_polarisable.aafilled.vcf}
+
+```
+
+###Polarise the AA-filled VCF:
+```{bash}
+
+module load bcftools/1.9
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/
+
+#Polarize the VCF:
+FILE=crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.two_parsimony_polarisable.aafilled.vcf
+N_IND=$(bcftools query -l $FILE | wc -l)
+ID_FIRST=$(bcftools query -l $FILE | head -n1)
+N_FIRST=$(grep -v '##' $FILE | grep '#' | tr "\t" "\n" | grep -n $ID_FIRST | cut -d':' -f1)
+grep -v '#' $FILE | awk -F"\t|AA=" '$4==$9' > ${FILE/.vcf/.consistent.vcf}
+grep -v '#' $FILE | awk -F"\t|AA=" '$5==$9' | awk -F";AF=|;EMstats=" '{printf ("%s;AF=%s;EMstats=%s\n", $1,1-$2,$3)}' > ${FILE/.vcf/.inconsistent.vcf}
+cut -f-$((N_FIRST-1)) ${FILE/.vcf/.inconsistent.vcf} | awk '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$5,$4,$6,$7,$8,$9,$10)}' > ${FILE/.vcf/.inconsistent.polarized.vcf}
+for col in $(seq $N_FIRST $((N_FIRST+N_IND-1)))
+  do
+  echo "processing individual in column number" $col
+  paste ${FILE/.vcf/.inconsistent.polarized.vcf} <(cut -f$col ${FILE/.vcf/.inconsistent.vcf} | awk -F":|," '$1 == "\." {printf ("%s:%s:%s:%s,%s:%s,%s:%s,%s\n", $1,$2,$3,$5,$4,$7,$6,$9,$8)} $1 != "\." {printf ("%s,%s:%s:%s:%s,%s:%s,%s:%s,%s\n", $2,$1,$3,$4,$6,$5,$8,$7,$10,$9)}') > ${FILE/.vcf/.inconsistent.temp}
+  mv ${FILE/.vcf/.inconsistent.temp} ${FILE/.vcf/.inconsistent.polarized.vcf} #if the first field of each individual is just a dot, define 9 columns and swap them accordingly; otherwise define 10 columns and swap them accordingly.
+  done
+cat <(grep '#' $FILE) ${FILE/.vcf/.consistent.vcf} ${FILE/.vcf/.inconsistent.polarized.vcf} | bcftools sort > ${FILE/.aafilled.vcf/.polarized.vcf}
+
+#Note: the files named "polarisable_test" were created in the original version of this script (now lost). These files use the ancestral inference from the slow inbreeding project, obtained with est-sfs. The code to generate those (obsolete) files isn't included in this new version of the script.
+
+```
+
+#6. Carry out general annotation with ANNOVAR:
+##Build the drosophila database.
+###Good complete version (changes codes in the UCSC database).
+```{R, engine='bash'}
+
+cd /share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/
+scp -pr ./two_parsimony_ancestral_dm6 ./slow_inbreeding_two_parsimony_ancestral_dm6
+cd slow_inbreeding_two_parsimony_ancestral_dm6
+
+#Note: any code involving annotate_variation.pl won't work because apparently the server blocks its attempts to download files from an external website, so I had to replace it with alternative code.
+
+#The following commented section doesn't need to be repeated:
+<!-- #First download, uncompress and rename the gene database: -->
+<!-- wget https://hgdownload.cse.ucsc.edu/goldenPath/dm6/database/refGene.txt.gz -->
+<!-- gunzip -c refGene.txt.gz > dm6_refGene.txt -->
+
+<!-- #Next, download the chromosome names equivalence file (aka "alias" or "dictionary"), which we'll need to edit the gene database so that the scaffolds use the same nomenclature as our files: -->
+<!-- wget https://hgdownload.cse.ucsc.edu/goldenPath/dm6/bigZips/dm6.chromAlias.txt -->
+<!-- nano dm6.chromAlias.txt #edit it to add "mitochondrion_genome" in the fourth column for the row that starts with chrM. -->
+
+<!-- #Then we can replace all database names with the UCSC names, which are used in our VCFs and fasta files. -->
+<!-- DB_CODES=$(cut -f3 dm6_refGene.txt | sort | uniq) -->
+<!-- for old_code in ${DB_CODES[@]} -->
+<!--   do -->
+<!--   new_code=$(awk -v old=$old_code '$1==old' /share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/slow_inbreeding_two_parsimony_ancestral_dm6/dm6.chromAlias.txt | cut -f4) -->
+<!--   echo "${old_code} -> ${new_code}" -->
+<!--   sed -i -e "s/\<$old_code\>/$new_code/g" dm6_refGene.txt -->
+<!--   done -->
+
+<!-- diff <(cut -f-2,4- dm6_refGene.txt) <(cut -f-2,4- refGene.txt) #checks whether the previous loop modified any other field. Since no lines are returned, both files are identical (outside of the 3rd column, which was changed). -->
+
+#The following has to be repeated, since the new polarisation means that the ancestral genome has changed:
+#Copy the ancestral fasta (obtained above) to the aproppriate folder:
+scp -p /share/rdata/ramon.pouso/reference/indexed_reference/slow_inbreeding_two_parsimony_ancestral-all-chromosome-r6.14.fa dm6_seq/dm6_ancestral_dmel-all-chromosome-r6.14.fa
+
+#Next, use annovar to build the gene database:
+module load annovar/4.19
+retrieve_seq_from_fasta.pl dm6_refGene.txt -seqfile dm6_seq/dm6_ancestral_dmel-all-chromosome-r6.14.fa -format refGene -outfile dm6_refGeneMrna.fa
+
+```
+
+###Good non-redundant version (changes codes in the UCSC database).
+```{R, engine='bash'}
+
+#This version is a clone of the good complete version from which we'll remove all isoforms except for the longest one. Hence this is the "non-redundant" or "main isoforms" version of the annovar database, which we'll use to simplify the subsequent PROVEAN annotation.
+
+#The following commented section doesn't need to be repeated:
+<!-- #First, download the .gtf gene database from the UCSC: -->
+<!-- cd /share/rdata/ramon.pouso/reference/indexed_reference/ -->
+<!-- wget https://hgdownload.soe.ucsc.edu/goldenPath/dm6/bigZips/genes/dm6.refGene.gtf.gz -->
+<!-- gunzip dm6.refGene.gtf.gz -->
+
+<!-- #Then extract the list of transcripts, calculate their size, and keep the largest one for each chromosome. -->
+<!-- awk -F"\t|gene_id |; transcript_id |;  gene_name " '($1 == "chr2L" || $1 == "chr2R" || $1 == "chr3L" || $1 == "chr3R" || $1 == "chr4" || $1 == "chrX") && $3=="transcript" {printf ("%s\t%s\t%s\t%s\n"),$1,$5-$4,$10,$11}' dm6.refGene.gtf | sed 's/"//g' | sort -k1,1 -k3,3 -k2,2nr | sort -k3,3 -u | sort -k1,1 -k3,3 > dm6nr.refGene.txt -->
+<!-- grep -Ff <(cut -f4 dm6nr.refGene.txt) dm6.refGene.gtf > dm6nr.refGene.gtf -->
+
+#Next, clone the previous ancestral database and rename it and some of its files to include the code "nr" (non-redundant):
+cd /share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/
+scp -pr slow_inbreeding_two_parsimony_ancestral_dm6 nr_slow_inbreeding_two_parsimony_ancestral_dm6
+cd nr_slow_inbreeding_two_parsimony_ancestral_dm6
+mv dm6_seq dm6nr_seq
+mv dm6nr_seq/dm6_ancestral_dmel-all-chromosome-r6.14.fa dm6nr_seq/dm6nr_ancestral_dmel-all-chromosome-r6.14.fa
+mv dm6.chromAlias.txt dm6nr.chromAlias.txt
+rm dm6_refGeneMrna.fa
+
+#Then subset the dm6 annovar database so that only main isoforms are kept, and remove the original database.
+grep -Ff <(cut -f4 /share/rdata/ramon.pouso/reference/indexed_reference/dm6nr.refGene.txt) dm6_refGene.txt > dm6nr_refGene.txt
+rm dm6_refGene.txt
+
+#Next, use annovar to build the gene database:
+module load annovar/4.19
+retrieve_seq_from_fasta.pl dm6nr_refGene.txt -seqfile dm6nr_seq/dm6nr_ancestral_dmel-all-chromosome-r6.14.fa -format refGene -outfile dm6nr_refGeneMrna.fa
+
+```
+
+##Annotate the VCFs.
+###Non-redundant version.
+```{R, engine='bash'}
+
+module load annovar/4.19
+module load gcc/7.2.0 
+module add gcc/7.2.0 
+
+
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/
+FILE=crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.two_parsimony_polarisable.polarized.vcf
+#FILE=kaka.vcf
+#First convert from VCF to table (annovar can't deal with the particular format of the pool. VCFs).
+convert2annovar.pl -format vcf4old --outfile ${FILE/.vcf/.annovar} $FILE
+
+#Next, annotate the table. The resulting file is automatically labelled as .vcf by the programme, even though it really isn't a VCF.
+table_annovar.pl ${FILE/.vcf/.annovar} /share/rdata/ramon.pouso/reference/indexed_reference/annovar_database/nr_slow_inbreeding_two_parsimony_ancestral_dm6 -vcfinput --outfile ${FILE/.vcf/.nr_annovar} -buildver dm6nr --protocol refGene --operation g
+
+#Convert the annotated table to a .bed.
+mv ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.vcf ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.tab
+awk -F"\t|;ANNOVAR_DATE" '{printf ("%s\t%s\t%s\tANNOVAR_DATE%s\n"),$1,$2-1,$3,$9}' ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.tab > ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.bed
+
+#Then intersect the polarized VCF with the annotated BED and edit it to obtain the annotated VCF:
+grep '^#' $FILE > ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.vcf
+bedtools intersect -a $FILE -b ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.bed -wb | awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s;%s\n"),$1,$2-1,$2,$3,$4,$5,$6,$7,$8,$NF}' | bedtools intersect -a stdin -b $FILE -wb | cut -f1,3-9,18- >> ${FILE/.vcf/.nr_annovar}.dm6nr_multianno.vcf
+
+```
+
+#9. Carry out 4-fold annotation.
+##Prepare list of genes with synonymous mutations.
+```{bash}
+
+mkdir -p /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/4fold
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/4fold
+
+rm two_parsimony_pools_gen0-140_synonymous_vcf.txt
+VCF="/share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.two_parsimony_polarisable.polarized.nr_annovar.dm6nr_multianno.vcf"
+
+#Extract list of sites which are annotated as synonymous:
+grep -e ';ExonicFunc.refGene=synonymous' $VCF >> two_parsimony_pools_gen0-140_synonymous_vcf.txt
+
+#Generate list with coordinates, gene and transcript names, and nucleotid changes:
+awk -F"\t|;AAChange.refGene=|;ALLELE_END" '{printf ("%s\t%s\t%s\n", $1,$2,$9)}' two_parsimony_pools_gen0-140_synonymous_vcf.txt | awk -F"\t|:|," '{printf ("%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$6)}' | awk -F"\t" '{OFS = FS} { gsub(/c\./,"", $5); print }' | grep -v "RNA" | sort -k3,3 -k1,1 -k2,2n -u > two_parsimony_pools_gen0-140_synonymous_gene_names.txt
+
+#Sanity checks:
+cut -f3 two_parsimony_pools_gen0-140_synonymous_gene_names.txt | sort -u | wc -l #11789 genes
+cut -f4 two_parsimony_pools_gen0-140_synonymous_gene_names.txt | sort -u | wc -l #11789 transcripts
+#If the number of unique gene names and transcript names is the same, the script worked. In a previous version both numbers were different, which allowed me to discover that some genes with parenthesis in their names were introducing bugs. I modified the code to the current version, and now everything checks.
+
+```
+
+##Retrieve the whole nucleotide sequence.
+```{bash}
+
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/4fold
+
+#First generate a more readable version of the non-redundant annotation file, which keeps only necessary data, and transforms coordinates from 1-based (GTF format) to 0-based (BED format):
+awk -F'\t|gene_id \"|"; transcript_id |; exon_id "|"; gene_name' '($1 == "chr2L" || $1 == "chr2R" || $1 == "chr3L" || $1 == "chr3R" || $1 == "chr4" || $1 == "chrX") && $3=="CDS" {printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\n"),$1,$4-1,$5,$7,$8,$10,$12}' /share/rdata/ramon.pouso/reference/indexed_reference/dm6nr.refGene.gtf > dm6nr.refGene.txt
+
+#Then cross it with the list of genes with synonymous variants to obtain coordinates for all CDS from all genes of interest. I tried to do it faster using grep -Fwf but some genes have special characters (such as "-") which are not considered part of a word, so it introduces some mistakes. So it's best to use this loop instead:
+GENES=$(cat two_parsimony_pools_gen0-140_synonymous_gene_names.txt | cut -f 3 | sort -u) #11789
+COUNTER=0
+rm two_parsimony_pools_gen0-140_synonymous.cds_list.dm6nr.refGene.txt
+for gen in ${GENES[@]}
+  do
+  #echo "${gen}"
+  awk -v gene_name=$gen '$6 == gene_name' dm6nr.refGene.txt >> two_parsimony_pools_gen0-140_synonymous.cds_list.dm6nr.refGene.txt
+  ((COUNTER++))
+  if [ $(( $COUNTER % 100 )) == 0 ]
+    then
+    echo "processed $COUNTER genes out of $(echo "$GENES" | wc -l)"
+  fi
+  done
+awk -F"\t" '{OFS = FS} { gsub(/chr/,"", $1); print }' two_parsimony_pools_gen0-140_synonymous.cds_list.dm6nr.refGene.txt > two_parsimony_pools_gen0-140_synonymous.cds_list.dm6nr.refGene.bed #Remove the "chr" from the chromosome names to convert them into the same format that the fasta uses.
+
+  ##Sanity checks:
+  cut -f6 two_parsimony_pools_gen0-140_synonymous.cds_list.dm6nr.refGene.bed | uniq | wc -l #11673 genes instead of the 11789 found in pools_gen0-140_synonymous_gene_names.txt because some of the genes in the annovar database are not included in the UCSC .gtf file. 
+  comm -3 <(cut -f3 two_parsimony_pools_gen0-140_synonymous_gene_names.txt | sort -u) <(cut -f6 two_parsimony_pools_gen0-140_synonymous.cds_list.dm6nr.refGene.bed | sort -u) | wc -l #116, which is the correct result of 11789-11673 
+  comm -3 <(cut -f3 two_parsimony_pools_gen0-140_synonymous_gene_names.txt | sort -u) <(cut -f6 two_parsimony_pools_gen0-140_synonymous.cds_list.dm6nr.refGene.bed | sort -u) | less -S #All results are displayed in the first column, which means that all missing entries are missing in the second file, and none from the second file are missing in the first one.
+
+#Retrieve reference sequences for all CDS (from the ancestral fasta to account for polarisation).
+module load gcc/7.2.0
+module add gcc/7.2.0
+bedtools getfasta -fi /share/rdata/ramon.pouso/reference/indexed_reference/slow_inbreeding_two_parsimony_ancestral-all-chromosome-r6.14.fa -bed two_parsimony_pools_gen0-140_synonymous.cds_list.dm6nr.refGene.bed -fo two_parsimony_pools_gen0-140_synonymous.cds_sequence.fa
+
+  ##Sanity checks:
+  grep -v '>' two_parsimony_pools_gen0-140_synonymous.cds_sequence.fa | wc -l #47669, which is the same number of CDS (lines) in the file two_parsimony_pools_gen0-140_synonymous.cds_list.dm6nr.refGene.bed.
+
+#Paste each CDS' sequence with the rest of the information.
+paste two_parsimony_pools_gen0-140_synonymous.cds_list.dm6nr.refGene.bed <(grep -v '>' two_parsimony_pools_gen0-140_synonymous.cds_sequence.fa) > two_parsimony_pools_gen0-140_synonymous.cds_list_and_sequence.dm6nr.refGene.bed
+
+  ##Sanity checks:
+  awk '{printf ("%s\t%s\n"),$3-$2,length($8)}' two_parsimony_pools_gen0-140_synonymous.cds_list_and_sequence.dm6nr.refGene.bed | awk '$1==$2' | wc -l #47669, which means that all retrieved sequences have the correct length (the same as the difference between their start and their end points).
+
+#Fuse all exons from each gene and store them in a file together with the gene name and the strand information.
+GENES=$(cat two_parsimony_pools_gen0-140_synonymous.cds_list_and_sequence.dm6nr.refGene.bed | cut -f 6 | sort -u)
+TOTAL=$(echo "$GENES" | wc -l)
+COUNTER=0
+rm two_parsimony_pools_gen0-140_synonymous.cds_list_and_sequence_combined.dm6nr.refGene.bed
+for gen in ${GENES[@]}
+  do
+  #echo "${gen}"
+  STRAND=$(awk -F"\t" -v gen=$gen '$6 == gen' two_parsimony_pools_gen0-140_synonymous.cds_list_and_sequence.dm6nr.refGene.bed | shuf -n1 | cut -f 4)
+  CODING_SEQUENCE=$(awk -F"\t" -v gen=$gen '$6 == gen {print $8}' two_parsimony_pools_gen0-140_synonymous.cds_list_and_sequence.dm6nr.refGene.bed | tr -d '\n')
+  echo -e "$gen\t$STRAND\t$CODING_SEQUENCE" >> two_parsimony_pools_gen0-140_synonymous.cds_list_and_sequence_combined.dm6nr.refGene.bed
+  ((COUNTER++))
+  if [ $(( $COUNTER % 50 )) == 0 ]
+    then
+    echo "processed $COUNTER genes out of $(echo "$GENES" | wc -l)"
+  fi
+  done
+
+```
+
+##Retrieve codons:
+```{bash}
+
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/4fold
+
+#First join the synonymous variants and the gene information:
+join -1 3 -2 1 <(sort -k3,3 two_parsimony_pools_gen0-140_synonymous_gene_names.txt) two_parsimony_pools_gen0-140_synonymous.cds_list_and_sequence_combined.dm6nr.refGene.bed | awk '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $2, $3-1, $3, $1, $4, $6, $5, $7)}' > two_parsimony_pools_gen0-140_synonymous.cds_list_and_sequence_combined.complete_info.dm6nr.refGene.bed #146051
+
+#Then for each variant retrieve the codon it belongs to:
+rm two_parsimony_pools_gen0-140_synonymous.cds_list_and_sequence_combined.codons.dm6nr.refGene.bed
+TOTAL=$(cat two_parsimony_pools_gen0-140_synonymous.cds_list_and_sequence_combined.complete_info.dm6nr.refGene.bed | wc -l)
+COUNTER=0
+while read -r CHR START END GENE TRANSCRIPT STRAND SNP_CHANGE SEQUENCE; do
+  SNP=$(echo "${SNP_CHANGE:1:${#SNP_CHANGE}-2}")
+  if [ $STRAND == "+" ]
+    then
+    if [ $(( $SNP % 3 )) == 0 ]
+      then 
+      OLD_CODON=$(echo $SEQUENCE | cut -c$(($SNP-2))-$SNP)
+      NEW_CODON=$(echo "${OLD_CODON:0:2}${SNP_CHANGE: -1}")
+    elif [ $(( $SNP % 3 )) == 2 ]
+      then 
+      OLD_CODON=$(echo $SEQUENCE | cut -c$(($SNP-1))-$(($SNP+1)))
+      NEW_CODON=$(echo "${OLD_CODON:0:1}${SNP_CHANGE: -1}${OLD_CODON:2:3}")
+    elif [ $(( $SNP % 3 )) == 1 ]
+      then 
+      OLD_CODON=$(echo $SEQUENCE | cut -c$SNP-$(($SNP+2)))
+      NEW_CODON=$(echo "${SNP_CHANGE: -1}${OLD_CODON:1:3}")
+    fi
+  elif [ $STRAND == "-" ]
+    then
+    REVERSE_SEQUENCE=$(echo $SEQUENCE | tr ACGT TGCA | rev) #this code obtains the reverse complementary sequence
+    if [ $(( $SNP % 3 )) == 0 ]
+      then 
+      OLD_CODON=$(echo $REVERSE_SEQUENCE | cut -c$(($SNP-2))-$SNP)
+      NEW_CODON=$(echo "${OLD_CODON:0:2}${SNP_CHANGE: -1}")
+    elif [ $(( $SNP % 3 )) == 2 ]
+      then 
+      OLD_CODON=$(echo $REVERSE_SEQUENCE | cut -c$(($SNP-1))-$(($SNP+1)))
+      NEW_CODON=$(echo "${OLD_CODON:0:1}${SNP_CHANGE: -1}${OLD_CODON:2:3}")
+    elif [ $(( $SNP % 3 )) == 1 ]
+      then 
+      OLD_CODON=$(echo $REVERSE_SEQUENCE | cut -c$SNP-$(($SNP+2)))
+      NEW_CODON=$(echo "${SNP_CHANGE: -1}${OLD_CODON:1:3}")
+    fi
+  fi
+  echo -e "$CHR\t$START\t$END\t$GENE\t$TRANSCRIPT\t$STRAND\t$SNP_CHANGE\t$OLD_CODON\t$NEW_CODON" >> two_parsimony_pools_gen0-140_synonymous.cds_list_and_sequence_combined.codons.dm6nr.refGene.bed
+  ((COUNTER++))
+  if [ $(( $COUNTER % 1000 )) == 0 ]
+    then
+    echo "processed $COUNTER SNPs out of" $TOTAL
+  fi
+done < two_parsimony_pools_gen0-140_synonymous.cds_list_and_sequence_combined.complete_info.dm6nr.refGene.bed
+
+```
+
+##Extract 4-fold degenerate codons:
+```{bash}
+
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/4fold
+
+#First, save the list of 4-fold degenerate codons (obtained from https://github.com/seenstevo/Four-fold_degenerate_bedmaker/blob/master/FFDS_bedmaker.py) to a file:
+echo "CTT","CTA","CTG","CTC","GTT","GTC","GTA","GTG","TCT","TCC","TCA","TCG","CCT","CCC","CCA","CCG","ACT","ACC","ACA","ACG","GCT","GCC","GCA","GCG","CGT","CGC","CGA","CGG","GGT","GGC","GGA","GGG" | tr ',' '\n' > 4fold_codons.txt
+
+#Then filter the file obtained in the previous section, which contains the codon for each variant in the dataset, and filter in only those which are 4-fold degenerate (i.e., those from the 4fold file which appear both in column 8 and column 9).
+awk 'NR==FNR { A[$1]=1 ; next }; ($8 in A && $9 in A) { print }' 4fold_codons.txt two_parsimony_pools_gen0-140_synonymous.cds_list_and_sequence_combined.codons.dm6nr.refGene.bed > two_parsimony_pools_gen0-140_synonymous.cds_list_and_sequence_combined.4fold_codons.dm6nr.refGene.bed
+
+cut -f-4 two_parsimony_pools_gen0-140_synonymous.cds_list_and_sequence_combined.4fold_codons.dm6nr.refGene.bed > two_parsimony_pools_gen0-140_synonymous_variants_4fold.bed #79660
+
+#Note:
+cut -f9 two_parsimony_pools_gen0-140_synonymous.cds_list_and_sequence_combined.codons.dm6nr.refGene.bed | sort -u #this reveals that there are single-letter new codons, and (see next line)...
+cut -f8 two_parsimony_pools_gen0-140_synonymous.cds_list_and_sequence_combined.codons.dm6nr.refGene.bed | sort -u #this reveals that there are empty old codons.
+#After analysing this up-stream, I concluded that these aren't due to an error in these sections' code. Instead, they owe to ANNOVAR using the transcripts instead of the CDS for its annotation procedures, which results in "empty" old codons (those after the stop codon) being replaced by the single SNP change that appears in the VCF. Fortunately this doesn't interfere in the identification of 4fold degenerate codons.
+
+```
+
+#11. Combine and import all annotations into the VCF.
+##Import all annotations into the VCF.
+```{bash}
+
+module load gcc/7.2.0
+module add gcc/7.2.0
+
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants
+
+VCF=crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.two_parsimony_polarisable.polarized.nr_annovar.dm6nr_multianno.vcf
+
+rm ${VCF/vcf/custom_unsorted.vcf}
+#Not fourfold (i.e. synonymous but not fourfold degenerate), which will be obtained first as the difference between all synonymous variants and the list of fourfold ones:
+grep -E '^#|ExonicFunc.refGene=synonymous_SNV;' $VCF | bedtools subtract -a stdin -b ./4fold/two_parsimony_pools_gen0-140_synonymous_variants_4fold.bed | awk '{printf ("%s\t%s\t%s\n", $1,$2-1,$2)}' > ./4fold/two_parsimony_pools_gen0-140_synonymous_variants_NOT4fold.bed #this line doesn't need to be executed if the bed already exists.
+bedtools intersect -a $VCF -b ./4fold/two_parsimony_pools_gen0-140_synonymous_variants_NOT4fold.bed | awk '{gsub("NP=44;","CUSTOM=non-fourfold;NP=44;"); print}' >> ${VCF/vcf/custom_unsorted.vcf}
+#Fourfold:
+bedtools intersect -a $VCF -b ./4fold/two_parsimony_pools_gen0-140_synonymous_variants_4fold.bed | awk '{gsub("NP=44;","CUSTOM=fourfold;NP=44;"); print}' >> ${VCF/vcf/custom_unsorted.vcf}
+#Missense::
+grep ';ExonicFunc.refGene=nonsynonymous_SNV;' $VCF | awk '{gsub("NP=44;","CUSTOM=missense;NP=44;"); print}' >> ${VCF/vcf/custom_unsorted.vcf}
+#LoF:
+grep -E ';ExonicFunc.refGene=stopgain;|;ExonicFunc.refGene=stoploss;' $VCF | awk '{gsub("NP=44;","CUSTOM=LoF;NP=44;"); print}' >> ${VCF/vcf/custom_unsorted.vcf}
+
+#Sort the VCF and add the headers:
+cat <(grep "^#" $VCF) <(sort -k1,1 -k2,2n ${VCF/vcf/custom_unsorted.vcf}) > ${VCF/vcf/custom_complete.vcf}
+
+```
+
+#12. Split the VCFs at the pool level:
+##Exclude AF=0:
+###All sites:
+```{R, engine='bash'}
+
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts
+
+module load bcftools/1.9
+
+VCF="/share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.two_parsimony_polarisable.polarized.nr_annovar.dm6nr_multianno.custom_complete.vcf"
+POOLS=$(bcftools query -l "${VCF}")
+for p in ${POOLS[@]}
+  do
+  echo "${p}"
+  SAMPLE=$(echo "${p}" | cut -d'_' -f1 | sort | uniq)
+  FIELD_NUMBER=$(grep "^#" $VCF | grep -v '##' | tr "\t" "\n" | grep -nw $p | cut -d':' -f1)
+  if [[ "$SAMPLE" == "sample"* ]]
+    then
+    GEN=$(echo "${p}" | tr "_" "\n" | grep "gen")
+    paste <(grep -v '^#' $VCF | awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5,$6,$7,$8)}') <(grep -v '^#' $VCF | cut -f$FIELD_NUMBER | awk -F":|," '{printf ("%s\t%s\n", $4+$6+$8,$5+$7+$9)}') | awk '$11 > 0' > "${SAMPLE}"_"${GEN}"_gen0-140_pool.two_parsimony.txt
+    else
+    paste <(grep -v '^#' $VCF | awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5,$6,$7,$8)}') <(grep -v '^#' $VCF | cut -f$FIELD_NUMBER | awk -F":|," '{printf ("%s\t%s\n", $4+$6+$8,$5+$7+$9)}') | awk '$11 > 0' > "${SAMPLE}"_gen0-140_pool.two_parsimony.txt
+  fi
+  done
+
+mv LBT0_gen0-140_pool.two_parsimony.txt LBT0_gen0_gen0-140_pool.two_parsimony.txt
+mv c1_gen0-140_pool.two_parsimony.txt c1_gen5_gen0-140_pool.two_parsimony.txt
+mv BT20_gen0-140_pool.two_parsimony.txt BT20_gen20_gen0-140_pool.two_parsimony.txt
+mv BT30_gen0-140_pool.two_parsimony.txt BT30_gen30_gen0-140_pool.two_parsimony.txt
+mv c2_gen0-140_pool.two_parsimony.txt c2_gen40_gen0-140_pool.two_parsimony.txt
+mv C1_gen0-140_pool.two_parsimony.txt C1_gen140_gen0-140_pool.two_parsimony.txt
+
+```
+
+##Include AF=0:
+###All sites:
+```{R, engine='bash'}
+
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/
+
+module load bcftools/1.9
+
+VCF="/share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.two_parsimony_polarisable.polarized.nr_annovar.dm6nr_multianno.custom_complete.vcf"
+POOLS=$(bcftools query -l "${VCF}")
+for p in ${POOLS[@]}
+  do
+  echo "${p}"
+  #ID=$(echo "${p}")
+  #POOL_NAME=$(echo "${p}")
+  SAMPLE=$(echo "${p}" | cut -d'_' -f1 | sort | uniq)
+  FIELD_NUMBER=$(grep "^#" $VCF | grep -v '##' | tr "\t" "\n" | grep -nw $p | cut -d':' -f1)
+  if [[ "$SAMPLE" == "sample"* ]]
+    then
+    GEN=$(echo "${p}" | tr "_" "\n" | grep "gen")
+    paste <(grep -v '^#' $VCF | awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5,$6,$7,$8)}') <(grep -v '^#' $VCF | cut -f$FIELD_NUMBER | awk -F":|," '{printf ("%s\t%s\n", $4+$6+$8,$5+$7+$9)}') > "${SAMPLE}"_"${GEN}"_gen0-140_pool.all.two_parsimony.txt
+    else
+    paste <(grep -v '^#' $VCF | awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5,$6,$7,$8)}') <(grep -v '^#' $VCF | cut -f$FIELD_NUMBER | awk -F":|," '{printf ("%s\t%s\n", $4+$6+$8,$5+$7+$9)}') > "${SAMPLE}"_gen0-140_pool.all.two_parsimony.txt
+  fi
+  done
+
+mv LBT0_gen0-140_pool.all.two_parsimony.txt LBT0_gen0_gen0-140_pool.all.two_parsimony.txt
+mv c1_gen0-140_pool.all.two_parsimony.txt c1_gen5_gen0-140_pool.all.two_parsimony.txt
+mv BT20_gen0-140_pool.all.two_parsimony.txt BT20_gen20_gen0-140_pool.all.two_parsimony.txt
+mv BT30_gen0-140_pool.all.two_parsimony.txt BT30_gen30_gen0-140_pool.all.two_parsimony.txt
+mv c2_gen0-140_pool.all.two_parsimony.txt c2_gen40_gen0-140_pool.all.two_parsimony.txt
+mv C1_gen0-140_pool.all.two_parsimony.txt C1_gen140_gen0-140_pool.all.two_parsimony.txt
+
+```
+
+#13A. Retrieve counts.
+##Total observed counts.
+###Exclude AF=0 VCFs:
+####Retrieve derived counts per category:
+#####All sites:
+```{R, engine='bash'}
+
+REGION="autosomes" #all #autosomes #Xchr
+
+module load gcc/7.2.0
+module add gcc/7.2.0
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/
+rm two_parsimony_counts_pool_gen0-140_${REGION}_summary.txt
+echo -e "sample\tgeneration\tnon-fourfold_V\tnon-fourfold_D\tfourfold_V\tfourfold_D\tmissense_V\tmissense_D\tLoF_V\tLoF_D" > two_parsimony_counts_pool_gen0-140_${REGION}_summary.txt
+POOL_LIST=($(ls -v `find . -name '*_gen0-140_pool.two_parsimony.txt' -print`))
+for pool in "${POOL_LIST[@]}"
+  do
+  echo "${pool}"
+  SAMPLE=$(echo "${pool}" | cut -d'/' -f2 | cut -d'_' -f1)
+  GEN=$(echo "${pool}" | cut -d'/' -f2 | cut -d'_' -f2)
+  if [ $REGION == "autosomes" ]
+    then
+    grep -v "^X" $pool > ${pool/.txt/_${REGION}.txt}
+    p=${pool/.txt/_${REGION}.txt}
+  elif [ $REGION == "Xchr" ]
+    then
+    grep "^X" $pool > ${pool/.txt/_${REGION}.txt}
+    p=${pool/.txt/_${REGION}.txt}
+  elif [ $REGION == "all" ]
+    then
+    p=${pool}
+  fi
+  NONFOURFOLD_V=$(grep "CUSTOM=non-fourfold;" $p | wc -l)
+  NONFOURFOLD_D=$(grep "CUSTOM=non-fourfold;" $p | awk '{print $11}' | paste -sd+ | bc)
+  FOURFOLD_V=$(grep "CUSTOM=fourfold;" $p | wc -l)
+  FOURFOLD_D=$(grep "CUSTOM=fourfold;" $p | awk '{print $11}' | paste -sd+ | bc)
+  MISSENSE_V=$(grep "CUSTOM=missense;" $p | wc -l)
+  MISSENSE_D=$(grep "CUSTOM=missense;" $p | awk '{print $11}' | paste -sd+ | bc)
+  LOF_V=$(grep "CUSTOM=LoF;" $p | wc -l)
+  LOF_D=$(grep "CUSTOM=LoF;" $p | awk '{print $11}' | paste -sd+ | bc)
+  echo -e "$SAMPLE\t$GEN\t$NONFOURFOLD_V\t$NONFOURFOLD_D\t$FOURFOLD_V\t$FOURFOLD_D\t$MISSENSE_V\t$MISSENSE_D\t$LOF_V\t$LOF_D" >> two_parsimony_counts_pool_gen0-140_${REGION}_summary.txt
+  done
+
+#From the local environment:
+REGION="autosomes" #all #autosomes #Xchr
+scp ramon.pouso@rua2.uvigo.es://share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/two_parsimony_counts_pool_gen0-140_${REGION}_summary.txt /Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/all_sites/gen0-140/
+
+```
+
+#13B. Retrieve rarefied counts.
+##Generate depth table for all sites:
+```{R, engine='bash'}
+
+#After observing the depth distribution of all samples, we've decided to leave out 3 lines (1, 10, and 17) due to their lower depth. Pb-005 is also out from the analysis.
+module load gcc/7.2.0
+module add gcc/7.2.0
+
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/
+
+#Create dataframe with the info from each site in the VCF:
+echo -e "CHR\tSTART\tEND\tID\tANCESTRAL\tDERIVED\tQUAL\tFILTER\tINFO" > two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt
+cut -f-9 LBT0_gen0_gen0-140_pool.all.two_parsimony.txt >> two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt
+
+#Extract counts from each pool.
+POOLS=$(ls *gen0-140_pool.all.two_parsimony.txt | grep -Ev 'c1_gen5_|sample1_|sample10_|sample17_')
+for p in ${POOLS[@]}
+  do
+  echo "${p}"
+  SAMPLE=$(echo $p | cut -d'_' -f-2)
+  paste two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt <(cat <(echo $SAMPLE) <(awk -F"\t" '{printf ("%s\n", $10+$11)}' "${p}")) > two_parsimony_all_samples_gen0-140_pool.all.depth_table.temp.txt && mv two_parsimony_all_samples_gen0-140_pool.all.depth_table.temp.txt two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt #202098
+  done
+  
+DEPTH=50 #input the desired target depth
+#Count valid (1, if depth ≥ $DEPTH) and invalid (0, if depth < $DEPTH) sites per population (if any pool from that population doesn't reach the depth threshold, the site is invalid).
+##Create dataframe with the info from each site in the VCF:
+echo -e "CHR\tSTART\tEND\tID\tANCESTRAL\tDERIVED\tQUAL\tFILTER\tINFO" > two_parsimony_all_samples_gen0-140_pool.all.depth_${DEPTH}_table.bool
+cut -f-9 LBT0_gen0_gen0-140_pool.all.two_parsimony.txt >> two_parsimony_all_samples_gen0-140_pool.all.depth_${DEPTH}_table.bool
+##Base population:
+cut -f-9 LBT0_gen0_gen0-140_pool.all.two_parsimony.txt > two_parsimony_all_samples_gen0-140_pool.all.depth_${DEPTH}_table.bool.Pb
+COLUMNS=$(head -n1 two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | tr '\t' '\n' | grep -nE 'BT20_gen20|BT30_gen30|C1_gen140|c2_gen40|LBT0_gen0' | awk -F":" '{printf ("%s\n", $1)}')
+for column in ${COLUMNS[@]}
+  do
+  #echo "$column"
+  paste two_parsimony_all_samples_gen0-140_pool.all.depth_${DEPTH}_table.bool.Pb <(tail -n+2 two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | awk -v field="$column" -v target_depth="$DEPTH" -F"\t" '{ if ($field >= target_depth) {print 1} else {print 0} }') > two_parsimony_all_samples_gen0-140_pool.all.depth_${DEPTH}_table.bool.temp.Pb && mv two_parsimony_all_samples_gen0-140_pool.all.depth_${DEPTH}_table.bool.temp.Pb two_parsimony_all_samples_gen0-140_pool.all.depth_${DEPTH}_table.bool.Pb
+  done
+paste two_parsimony_all_samples_gen0-140_pool.all.depth_${DEPTH}_table.bool <(cat <(echo "Pb") <(awk -F"\t" '{ if (($10==0) || ($11==0) || ($12==0) || ($13==0) || ($14==0)) {print 0} else {print 1} }' two_parsimony_all_samples_gen0-140_pool.all.depth_${DEPTH}_table.bool.Pb)) > two_parsimony_all_samples_gen0-140_pool.all.depth_${DEPTH}_table.temp.bool && mv two_parsimony_all_samples_gen0-140_pool.all.depth_${DEPTH}_table.temp.bool two_parsimony_all_samples_gen0-140_pool.all.depth_${DEPTH}_table.bool
+##Lines:
+POOLS=$(head -n1 two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | tr '\t' '\n' | grep "sample" | cut -d'_' -f1 | sort -u)
+for pool in ${POOLS[@]}
+  do
+  echo "$pool"
+  COLUMN_140=$(head -n1 two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | tr '\t' '\n' | grep -nE "${pool}_gen140" | awk -F":" '{printf ("%s\n", $1)}')
+  COLUMN_040=$(head -n1 two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | tr '\t' '\n' | grep -nE "${pool}_gen40" | awk -F":" '{printf ("%s\n", $1)}')
+  paste two_parsimony_all_samples_gen0-140_pool.all.depth_${DEPTH}_table.bool <(cat <(echo "$pool") <(tail -n+2 two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | awk -v gen140="$COLUMN_140" -v gen40="$COLUMN_040" -v target_depth="$DEPTH" -F"\t" '{ if (($gen140 >= target_depth) && ($gen40 >= target_depth)) {print 1} else {print 0} }')) > two_parsimony_all_samples_gen0-140_pool.all.depth_${DEPTH}_table.temp.bool && mv two_parsimony_all_samples_gen0-140_pool.all.depth_${DEPTH}_table.temp.bool two_parsimony_all_samples_gen0-140_pool.all.depth_${DEPTH}_table.bool
+  done
+
+```
+
+##For all sites.
+###Extract state from all reads:
+####extract_state_reads.all_sites.two_parsimony.sh
+```{R, engine='bash'}
+
+DEPTH=$1
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/
+POOL=$(ls *gen0-140_pool.all.two_parsimony.txt | head -n$SGE_TASK_ID | tail -n1)
+
+rm ${POOL/.txt/_mod.txt}
+while read -r CHR START STOP ID ANC_STATE DER_STATE QUALITY TAG INFO ANC_COUNT DER_COUNT
+  do
+  TOT_COUNT=$((ANC_COUNT + DER_COUNT))
+  READS=$(echo "$(for i in $(seq 1 $ANC_COUNT); do printf "$ANC_STATE" ; done)""$(for i in $(seq 1 $DER_COUNT); do printf "$DER_STATE" ; done)")
+  echo -e "$CHR\t$START\t$STOP\t$ANC_STATE\t$DER_STATE\t$ANC_COUNT\t$DER_COUNT\t$TOT_COUNT\t$READS" >> ${POOL/.txt/_mod.txt}
+  done < $POOL
+
+#Save this code as: /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/extract_state_reads.all_sites.two_parsimony.sh
+
+```
+
+####Send the array-jobs:
+```{R, engine='bash'}
+
+#Run it as follows:
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/
+
+POOL_N=$(ls *gen0-140_pool.all.two_parsimony.txt | wc -l)
+qsub -cwd -l h=compute-0-9 -t 1-$POOL_N /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/extract_state_reads.all_sites.two_parsimony.sh
+
+```
+
+###V as the minimum available number across populations:
+####Find number V:
+```{R, engine='bash'}
+
+#First the global depth table must be obtained in the first chunk of section 13B. Also the extraction of the state of the reads must be obtained in the "For all sites" section.
+
+module load gcc/7.2.0
+module add gcc/7.2.0
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/
+
+REGION="all" #all #autosomes #Xchr
+DEPTH=50
+
+#Count V (number of valid sites, that is, those with depth => $DEPTH) per pool and category:
+rm two_parsimony_all_samples_gen0-140_pool.${REGION}.depth_table.perpop_mindepth_${DEPTH}.txt
+echo -e "population\tnon-fourfold\tfourfold\tmissense\tLoF" > two_parsimony_all_samples_gen0-140_pool.${REGION}.depth_table.perpop_mindepth_${DEPTH}.txt
+
+#For lines:
+POP_LIST=$(head -n1 two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | cut -f10- | tr "\t" "\n" | cut -d'_' -f1 | grep "sample" | uniq)
+for pop in ${POP_LIST[@]}
+  do
+  echo "${pop}"
+  #SAMPLE=$(echo "${pool}" | cut -d'_' -f1)
+  #GEN=$(echo "${pool}" | cut -d'_' -f2)
+  COLS=$(head -n1 two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | cut -f10- | tr "\t" "\n" | grep -n "^$pop" | cut -d':' -f1 | awk '{for (i=1; i<=NF; i++) $i += 9} 1')
+  FIELDS=$(echo $COLS | tr " " "-")
+  if [ $REGION == "autosomes" ]
+    then
+    NONFOURFOLD_V=$(grep "CUSTOM=non-fourfold;" two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | grep -v "^X" | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth)' | wc -l)
+    FOURFOLD_V=$(grep "CUSTOM=fourfold;" two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | grep -v "^X" | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth)' | wc -l)
+    MISSENSE_V=$(grep "CUSTOM=missense;" two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | grep -v "^X" | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth)' | wc -l)
+    LOF_V=$(grep "CUSTOM=LoF;" two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | grep -v "^X" | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth)' | wc -l)
+  elif [ $REGION == "Xchr" ]
+    then
+    NONFOURFOLD_V=$(grep "CUSTOM=non-fourfold;" two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | grep "^X" | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth)' | wc -l)
+    FOURFOLD_V=$(grep "CUSTOM=fourfold;" two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | grep "^X" | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth)' | wc -l)
+    MISSENSE_V=$(grep "CUSTOM=missense;" two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | grep "^X" | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth)' | wc -l)
+    LOF_V=$(grep "CUSTOM=LoF;" two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | grep "^X" | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth)' | wc -l)
+  elif [ $REGION == "all" ]
+    then
+    NONFOURFOLD_V=$(grep "CUSTOM=non-fourfold;" two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth)' | wc -l)
+    FOURFOLD_V=$(grep "CUSTOM=fourfold;" two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth)' | wc -l)
+    MISSENSE_V=$(grep "CUSTOM=missense;" two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth)' | wc -l)
+    LOF_V=$(grep "CUSTOM=LoF;" two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth)' | wc -l)
+  fi
+  echo -e "$pop\t$NONFOURFOLD_V\t$FOURFOLD_V\t$MISSENSE_V\t$LOF_V" >> two_parsimony_all_samples_gen0-140_pool.${REGION}.depth_table.perpop_mindepth_${DEPTH}.txt
+  done
+  
+#For Pb:
+COLS=$(head -n1 two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | cut -f10- | tr "\t" "\n" | cut -d'_' -f1 | grep -nv "sample" | cut -d':' -f1 | awk '{for (i=1; i<=NF; i++) $i += 9} 1')
+FIELDS=$(echo $COLS | cut -d' ' -f1,5 | tr " " "-")
+echo "Pb"
+if [ $REGION == "autosomes" ]
+  then
+  grep "CUSTOM=non-fourfold;" two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | grep -v "^X" | cut -f-9,$FIELDS | awk -v depth=$DEPTH '($10 >= depth) && ($11 >= depth) && ($12 >= depth) && ($13 >= depth) && ($14 >= depth)' | cut -f-3 > two_parsimony_Pb.autosomes.perpop_V_sites.ann_cat_non-fourfold.bed
+  NONFOURFOLD_V=$(wc -l < two_parsimony_Pb.autosomes.perpop_V_sites.ann_cat_non-fourfold.bed)
+  grep "CUSTOM=fourfold;" two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | grep -v "^X" | cut -f-9,$FIELDS | awk -v depth=$DEPTH '($10 >= depth) && ($11 >= depth) && ($12 >= depth) && ($13 >= depth) && ($14 >= depth)' | cut -f-3 > two_parsimony_Pb.autosomes.perpop_V_sites.ann_cat_fourfold.bed
+  FOURFOLD_V=$(wc -l < two_parsimony_Pb.autosomes.perpop_V_sites.ann_cat_fourfold.bed)
+  grep "CUSTOM=missense;" two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | grep -v "^X" | cut -f-9,$FIELDS | awk -v depth=$DEPTH '($10 >= depth) && ($11 >= depth) && ($12 >= depth) && ($13 >= depth) && ($14 >= depth)' | cut -f-3 > two_parsimony_Pb.autosomes.perpop_V_sites.ann_cat_missense.bed
+  MISSENSE_V=$(wc -l < two_parsimony_Pb.autosomes.perpop_V_sites.ann_cat_missense.bed)
+  grep "CUSTOM=LoF;" two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | grep -v "^X" | cut -f-9,$FIELDS | awk -v depth=$DEPTH '($10 >= depth) && ($11 >= depth) && ($12 >= depth) && ($13 >= depth) && ($14 >= depth)' | cut -f-3 > two_parsimony_Pb.autosomes.perpop_V_sites.ann_cat_LoF.bed
+  LOF_V=$(wc -l < two_parsimony_Pb.autosomes.perpop_V_sites.ann_cat_LoF.bed)
+elif [ $REGION == "Xchr" ]
+  then
+  NONFOURFOLD_V=$(grep "CUSTOM=non-fourfold;" two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | grep "^X" | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth) && ($3 >= depth) && ($4 >= depth) && ($5 >= depth)' | wc -l)
+  FOURFOLD_V=$(grep "CUSTOM=fourfold;" two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | grep "^X" | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth) && ($3 >= depth) && ($4 >= depth) && ($5 >= depth)' | wc -l)
+  MISSENSE_V=$(grep "CUSTOM=missense;" two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | grep "^X" | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth) && ($3 >= depth) && ($4 >= depth) && ($5 >= depth)' | wc -l)
+  LOF_V=$(grep "CUSTOM=LoF;" two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | grep "^X" | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth) && ($3 >= depth) && ($4 >= depth) && ($5 >= depth)' | wc -l)
+elif [ $REGION == "all" ]
+  then
+  NONFOURFOLD_V=$(grep "CUSTOM=non-fourfold;" two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth) && ($3 >= depth) && ($4 >= depth) && ($5 >= depth)' | wc -l)
+  FOURFOLD_V=$(grep "CUSTOM=fourfold;" two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth) && ($3 >= depth) && ($4 >= depth) && ($5 >= depth)' | wc -l)
+  MISSENSE_V=$(grep "CUSTOM=missense;" two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth) && ($3 >= depth) && ($4 >= depth) && ($5 >= depth)' | wc -l)
+  LOF_V=$(grep "CUSTOM=LoF;" two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth) && ($3 >= depth) && ($4 >= depth) && ($5 >= depth)' | wc -l)
+fi
+echo -e "Pb\t$NONFOURFOLD_V\t$FOURFOLD_V\t$MISSENSE_V\t$LOF_V" >> two_parsimony_all_samples_gen0-140_pool.${REGION}.depth_table.perpop_mindepth_${DEPTH}.txt
+
+
+#Retrieve min V per category:
+rm two_parsimony_all_samples_gen0-140_pool.${REGION}.min_V.perpop_mindepth_${DEPTH}.txt
+ANN_CATEGORIES=$(head -n1 two_parsimony_all_samples_gen0-140_pool.${REGION}.depth_table.perpop_mindepth_${DEPTH}.txt | cut -f2- | tr "\t" "\n")
+for category in ${ANN_CATEGORIES[@]}
+  do
+  echo "${category}"
+  COL=$((1 + $(head -n1 two_parsimony_all_samples_gen0-140_pool.${REGION}.depth_table.perpop_mindepth_${DEPTH}.txt | cut -f2- | tr "\t" "\n" | grep -n "^$category" | cut -d':' -f1)))
+  FIELDS=$(tail -n+2 two_parsimony_all_samples_gen0-140_pool.${REGION}.depth_table.perpop_mindepth_${DEPTH}.txt | sort -k${COL},${COL}n | head -n1 | cut -f1,$COL)
+  echo -e "$category\t$FIELDS" >> two_parsimony_all_samples_gen0-140_pool.${REGION}.min_V.perpop_mindepth_${DEPTH}.txt
+  done
+
+```
+
+####Generate rarefied counts:
+#####Lines:
+######rarefied_counts.perpop_V_sites.lines.two_parsimony.sh
+```{R, engine='bash'}
+
+export PATH=$PATH:/share/apps/bedtools2/bin:/share/apps/est-sfs-release-2.03/:/share/apps/BAMTOOLS/bin:/share/apps/bedtools2/bin
+module load gcc/7.2.0
+module add gcc/7.2.0
+
+DEPTH=$1
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/
+POP=$(ls *gen0-140_pool.all.two_parsimony.txt | grep "sample" | grep -Ev 'sample1_|sample10_|sample17_' | cut -d'_' -f1 | uniq | head -n$SGE_TASK_ID | tail -n1)
+echo $POP
+POOLS=$(ls *gen0-140_pool.all.two_parsimony.txt | grep "^${POP}_")
+COLS=$(head -n1 two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | cut -f10- | tr "\t" "\n" | grep -n "^$POP" | cut -d':' -f1 | awk '{for (i=1; i<=NF; i++) $i += 9} 1')
+FIELDS=$(echo $COLS | tr " " "-")
+
+ANN_CATEGORIES=$(head -n1 two_parsimony_all_samples_gen0-140_pool.autosomes.depth_table.perpop_mindepth_${DEPTH}.txt | cut -f2- | tr "\t" "\n")
+for boot in {1..100}
+  do
+  N_BOOT=$(printf "%03d" ${boot})
+  #echo $N_BOOT
+  for category in ${ANN_CATEGORIES[@]}
+    do
+    #echo "${category}"
+    V_CAT=$(awk -v categ=$category '$1==categ' two_parsimony_all_samples_gen0-140_pool.autosomes.min_V.perpop_mindepth_${DEPTH}.txt | cut -f3)
+    grep "CUSTOM=$category;" two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | grep -v "^X" | cut -f-9,$FIELDS | awk -v depth=$DEPTH '($10 >= depth) && ($11 >= depth)' | shuf -n$V_CAT | sort -k1,1 -k2,2n | cut -f-3 > two_parsimony_${POP}.autosomes.perpop_V_sites.boot_${N_BOOT}.ann_cat_${category}.bed
+    for POOL in ${POOLS[@]}
+      do
+      bedtools intersect -a ${POOL/.txt/_mod.txt} -b two_parsimony_${POP}.autosomes.perpop_V_sites.boot_${N_BOOT}.ann_cat_${category}.bed | awk -v depth=$DEPTH -F"\t" 'BEGIN {"date +%N" | getline seed; srand(seed);} {if($8 >= depth) {printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t", $1,$2,$3,$4,$5,$6,$7,$8); len=length($9); for(i=1;i<=depth;) {k=int(rand()*len)+1; if(!(k in N)) {N[k]; printf "%s", substr($9,k,1); i++;}} split("", N); print ""} else {print}}' | awk -v categ=$category -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$6,$7,$8,$9,gsub($4, "", $9),gsub($5, "", $9),categ)}' > ./rarefied_counts/depth${DEPTH}/${POOL/.all.two_parsimony.txt/.autosomes.perpop_V_sites.boot_${N_BOOT}.ann_cat_$category.two_parsimony.txt}
+      done
+    rm two_parsimony_${POP}.autosomes.perpop_V_sites.boot_${N_BOOT}.ann_cat_${category}.bed
+    done
+  for POOL in ${POOLS[@]}
+    do
+    cat ./rarefied_counts/depth${DEPTH}/${POOL/.all.two_parsimony.txt/.autosomes.perpop_V_sites.boot_${N_BOOT}.ann_cat*.two_parsimony.txt} | sort -k1,1 -k2,2n -u > ./rarefied_counts/depth${DEPTH}/${POOL/.all.two_parsimony.txt/.autosomes.perpop_V_sites.boot_${N_BOOT}.two_parsimony.txt}
+    rm ./rarefied_counts/depth${DEPTH}/${POOL/.all.two_parsimony.txt/.autosomes.perpop_V_sites.boot_${N_BOOT}.ann_cat*.two_parsimony.txt}
+    done
+  done
+
+#Save this code as: /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/rarefied_counts.perpop_V_sites.lines.two_parsimony.sh
+
+```
+
+######Send the array-jobs:
+```{R, engine='bash'}
+
+#Run it as follows:
+DEPTH=50 #Input the desired target depth
+mkdir -p /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/depth${DEPTH} 
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/
+
+POP_N=$(ls *gen0-140_pool.all.two_parsimony.txt | grep "sample" | grep -Ev 'sample1_|sample10_|sample17_' | cut -d'_' -f1 | uniq | wc -l)
+qsub -cwd -l h=compute-0-9 -t 1-$POP_N /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/rarefied_counts.perpop_V_sites.lines.two_parsimony.sh $DEPTH
+
+```
+
+#####Pb:
+######rarefied_counts.perpop_V_sites.Pb.two_parsimony.sh
+```{R, engine='bash'}
+
+export PATH=$PATH:/share/apps/bedtools2/bin:/share/apps/est-sfs-release-2.03/:/share/apps/BAMTOOLS/bin:/share/apps/bedtools2/bin
+module load gcc/7.2.0
+module add gcc/7.2.0
+
+DEPTH=$1
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/
+POOL=$(ls *gen0-140_pool.all.two_parsimony.txt | grep -Ev "sample|gen5" | head -n$SGE_TASK_ID | tail -n1)
+COLS=$(head -n1 two_parsimony_all_samples_gen0-140_pool.all.depth_table.txt | cut -f10- | tr "\t" "\n" | grep -nv "^sample" | cut -d':' -f1 | awk '{for (i=1; i<=NF; i++) $i += 9} 1')
+FIELDS=$(echo $COLS | cut -d' ' -f1,5 | tr " " "-")
+
+ANN_CATEGORIES=$(head -n1 two_parsimony_all_samples_gen0-140_pool.autosomes.depth_table.perpop_mindepth_${DEPTH}.txt | cut -f2- | tr "\t" "\n")
+for boot in {1..100}
+  do
+  N_BOOT=$(printf "%03d" ${boot})
+  #echo $N_BOOT
+  for category in ${ANN_CATEGORIES[@]}
+    do
+    #echo "${category}"
+    bedtools intersect -a ${POOL/.txt/_mod.txt} -b two_parsimony_Pb.autosomes.perpop_V_sites.ann_cat_${category}.bed | awk -v depth=$DEPTH -F"\t" 'BEGIN {"date +%N" | getline seed; srand(seed);} {if($8 >= depth) {printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t", $1,$2,$3,$4,$5,$6,$7,$8); len=length($9); for(i=1;i<=depth;) {k=int(rand()*len)+1; if(!(k in N)) {N[k]; printf "%s", substr($9,k,1); i++;}} split("", N); print ""} else {print}}' | awk -v categ=$category -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$6,$7,$8,$9,gsub($4, "", $9),gsub($5, "", $9),categ)}' > ./rarefied_counts/depth${DEPTH}/${POOL/.all.two_parsimony.txt/.autosomes.perpop_V_sites.boot_${N_BOOT}.ann_cat_$category.two_parsimony.txt}
+    done
+  cat ./rarefied_counts/depth${DEPTH}/${POOL/.all.two_parsimony.txt/.autosomes.perpop_V_sites.boot_${N_BOOT}.ann_cat*.two_parsimony.txt} | sort -k1,1 -k2,2n -u > ./rarefied_counts/depth${DEPTH}/${POOL/.all.two_parsimony.txt/.autosomes.perpop_V_sites.boot_${N_BOOT}.two_parsimony.txt}
+  rm ./rarefied_counts/depth${DEPTH}/${POOL/.all.two_parsimony.txt/.autosomes.perpop_V_sites.boot_${N_BOOT}.ann_cat*.two_parsimony.txt}
+  done
+
+#Save this code as: /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/rarefied_counts.perpop_V_sites.Pb.two_parsimony.sh
+
+```
+
+######Send the array-jobs:
+```{R, engine='bash'}
+
+#Run it as follows:
+DEPTH=50 #Input the desired target depth
+mkdir -p /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/depth${DEPTH} 
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/
+
+POOL_N=$(ls *gen0-140_pool.all.two_parsimony.txt | grep -Ev "sample|gen5" | wc -l)
+qsub -cwd -l h=compute-0-9 -t 1-$POOL_N /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/rarefied_counts.perpop_V_sites.Pb.two_parsimony.sh $DEPTH
+
+```
+
+####Obtain the average rarefied values:
+#####detailed_counts.perpop_V_sites.sh
+```{R, engine='bash'}
+
+DEPTH=$1
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/
+ORI_POOL=$(ls *gen0-140_pool.all.two_parsimony.txt | grep -Ev 'gen5_|sample1_|sample10_|sample17_' | head -n$SGE_TASK_ID | tail -n1)
+POOL=$(echo ${ORI_POOL/.all.two_parsimony.txt/.autosomes.perpop_V_sites.two_parsimony})
+echo $POOL
+cd rarefied_counts/depth${DEPTH}/
+ANN_CATEGORIES=$(head -n1 /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/two_parsimony_all_samples_gen0-140_pool.autosomes.depth_table.perpop_mindepth_${DEPTH}.txt | cut -f2- | tr "\t" "\n")
+rm ${POOL/.perpop_V_sites.two_parsimony/.perpop_V_sites.detailed_counts.two_parsimony.txt}
+for boot in {1..100}
+  do
+  N_BOOT=$(printf "%03d" ${boot})
+  #echo $N_BOOT
+  for category in ${ANN_CATEGORIES[@]}
+    do
+    #echo $category
+    awk -v boot=$N_BOOT -v categ=$category '$12==categ {sum+=$11;} END {printf ("%s\t%s\t%s\n", boot, categ, sum)}' ${POOL/.perpop_V_sites.two_parsimony/.perpop_V_sites.boot_${N_BOOT}.two_parsimony.txt} >> ${POOL/.perpop_V_sites.two_parsimony/.perpop_V_sites.detailed_counts.two_parsimony.txt}
+    done
+  done
+
+#Save this code as: /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/detailed_counts.perpop_V_sites.two_parsimony.sh
+
+```
+
+#####Send the array-jobs:
+```{R, engine='bash'}
+
+#Run it as follows:
+DEPTH=50 #Input the desired target depth
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/
+
+POOL_N=$(ls *gen0-140_pool.all.two_parsimony.txt | grep -Ev 'gen5_|sample1_|sample10_|sample17_' | wc -l)
+qsub -cwd -l h=compute-0-9 -t 1-$POOL_N /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/detailed_counts.perpop_V_sites.two_parsimony.sh $DEPTH
+
+```
+
+####Retrieve derived counts per category:
+```{R, engine='bash'}
+
+REGION="autosomes" #all #autosomes #Xchr
+DEPTH=50
+N_BOOT=100
+
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/depth$DEPTH/
+rm two_parsimony_rarefied_depth_${DEPTH}_counts_pool_gen0-140_${REGION}_summary.perpop_V_sites.txt
+echo -e "sample\tgeneration\tnon-fourfold_D\tfourfold_D\tmissense_D\tLoF_D" > two_parsimony_rarefied_depth_${DEPTH}_counts_pool_gen0-140_${REGION}_summary.perpop_V_sites.txt
+POOL_LIST=($(ls *_gen0-140_pool.$REGION.perpop_V_sites.detailed_counts.two_parsimony.txt))
+for pool in "${POOL_LIST[@]}"
+  do
+  echo "${pool}"
+  SAMPLE=$(echo "${pool}" | cut -d'_' -f1)
+  GEN=$(echo "${pool}" | cut -d'_' -f2)
+  NONFOURFOLD_D=$(awk -v categ="non-fourfold" -v boot=$N_BOOT '$2==categ {sum+=$3;} END {printf ("%.3f\n", sum/boot)}' $pool)
+  FOURFOLD_D=$(awk -v categ="fourfold" -v boot=$N_BOOT '$2==categ {sum+=$3;} END {printf ("%.3f\n", sum/boot)}' $pool)
+  MISSENSE_D=$(awk -v categ="missense" -v boot=$N_BOOT '$2==categ {sum+=$3;} END {printf ("%.3f\n", sum/boot)}' $pool)
+  LOF_D=$(awk -v categ="LoF" -v boot=$N_BOOT '$2==categ {sum+=$3;} END {printf ("%.3f\n", sum/boot)}' $pool)
+  echo -e "$SAMPLE\t$GEN\t$NONFOURFOLD_D\t$FOURFOLD_D\t$MISSENSE_D\t$LOF_D" >> two_parsimony_rarefied_depth_${DEPTH}_counts_pool_gen0-140_${REGION}_summary.perpop_V_sites.txt
+  done
+
+#From the local environment:
+REGION="autosomes" #all #autosomes #Xchr
+DEPTH=50
+scp ramon.pouso@rua2.uvigo.es://share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/depth${DEPTH}/two_parsimony_rarefied_depth_${DEPTH}_counts_pool_gen0-140_${REGION}_summary.perpop_V_sites.txt /Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/all_sites/rarefied/depth${DEPTH}/
+
+```
+
+#14. Plot counts.
+##Derived count statistics:
+###Derived count ratios (relative to 4fold and Pb-000):
+####Empirical Pb and line averages (combined version):
+#####All sites:
+
+```{r Plot variant count results}
+
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(scales)
+
+
+type <- "autosomes" #all #autosomes #Xchr
+
+wd_path <- ("/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/all_sites/gen0-140/")
+pool_counts <- read_tsv(paste0(wd_path,"two_parsimony_counts_pool_gen0-140_",type,"_summary.txt")) %>% filter(generation!="gen5")
+
+codes_dictionary <- read_tsv(paste0(wd_path,"pop_codes_dictionary.txt"),col_names=c("old","population"))
+pool_counts <- left_join(pool_counts,codes_dictionary,by=c("sample"="old"))
+pool_counts$population = factor(pool_counts$population,levels=c("Pb","L01","L16","L27","L29","L31","L33","L34","L36","L38","L39","L42","L45","L48","L51","L52","L54","L59","L61","L63"))
+pool_counts$generation <- as.numeric(gsub("gen","",pool_counts$generation)) + 83
+pool_counts <- pool_counts %>% arrange(generation)
+pool_counts$generation = factor(pool_counts$generation)
+pool_counts <- pool_counts %>% arrange(population,generation)
+
+pool_counts_copies_4FR <- pool_counts %>% mutate(fourfold=fourfold_D/fourfold_D,missense=missense_D/fourfold_D,LoF=LoF_D/fourfold_D) %>% select(!contains(c("_V","_D","sample"))) %>% gather(ratio,value,-generation,-population,factor_key=T)
+pool_counts_copies_4FR
+
+r_average_vector <- c()
+for (r in unique(pool_counts_copies_4FR$ratio)) {
+  print(r)
+  r_average <- filter(pool_counts_copies_4FR,r==ratio & population=="Pb" & generation==83) %>% select(value) %>% unlist(.,use.names=F) %>% mean()
+  r_average_vector <- c(r_average_vector,rep(r_average,nrow(filter(pool_counts_copies_4FR,r==ratio))))
+}
+print(r_average_vector)
+
+relativised_pool_counts_copies_4FR <- mutate(pool_counts_copies_4FR, Pb_relative_value=value/r_average_vector, group=ifelse(population=="Pb","Pb","lines"))
+relativised_pool_counts_copies_4FR$group = factor(relativised_pool_counts_copies_4FR$group,levels=c("Pb","lines"))
+
+#Obtain per population averages and standard errors:
+se <- function(x) sqrt(var(x)/length(x)) #first define the standard error function
+
+average_relativised_pool_counts_copies_4FR <- data_frame("population"=character(0),"generation"=character(0),"ratio"=character(0),"avg_Pb_relative_value"=character(0),"se_Pb_relative_value"=character(0)) #next, create the empty dataframe
+
+for (pop in unique(relativised_pool_counts_copies_4FR$group)) { #then loop over each population and feature to get the (relativised) mean and standard error, and feed the dataframe
+  print(pop)
+  for (g in unlist(unique(select(filter(relativised_pool_counts_copies_4FR,group==pop),generation)),use.names=F)) {
+  #species <- filter(relativised_pool_counts_copies_4FR,ratio==r & population==pop) %>% select(species) %>% unlist(.,use.names=F) %>% unique()
+    for (r in unique(relativised_pool_counts_copies_4FR$ratio)) {
+      print(r)
+      pop_mean <- filter(relativised_pool_counts_copies_4FR,ratio==r & generation==g & group==pop) %>% select(Pb_relative_value) %>% unlist(.,use.names=F) %>% mean()
+      #print(paste0(pop," feature ",r," average is ",pop_mean))
+      pop_se <- filter(relativised_pool_counts_copies_4FR,ratio==r & generation==g & group==pop) %>% select(Pb_relative_value) %>% unlist(.,use.names=F) %>% se()
+      #print(paste0(pop," feature ",r," std error is ",pop_se))
+      row_data <- cbind(pop,g,r,pop_mean,pop_se)
+      colnames(row_data) <- c("population","generation","ratio","avg_Pb_relative_value","se_Pb_relative_value")
+      average_relativised_pool_counts_copies_4FR <- rbind(average_relativised_pool_counts_copies_4FR,row_data,stringsAsFactors=F)
+    }
+  }
+}
+average_relativised_pool_counts_copies_4FR$population = factor(average_relativised_pool_counts_copies_4FR$population,levels=c("Pb","lines"))
+average_relativised_pool_counts_copies_4FR$ratio = factor(average_relativised_pool_counts_copies_4FR$ratio,levels=c("fourfold","missense","LoF"))
+average_relativised_pool_counts_copies_4FR$generation <- as.factor(as.numeric(average_relativised_pool_counts_copies_4FR$generation))
+average_relativised_pool_counts_copies_4FR$avg_Pb_relative_value <- as.numeric(average_relativised_pool_counts_copies_4FR$avg_Pb_relative_value)
+average_relativised_pool_counts_copies_4FR$se_Pb_relative_value <- as.numeric(average_relativised_pool_counts_copies_4FR$se_Pb_relative_value)
+average_relativised_pool_counts_copies_4FR
+#write_tsv(average_relativised_pool_counts_copies_4FR,paste0(wd_path,"/pop_average_relativised_pool_counts_copies_4FR_",type,".txt"))
+
+
+#Plot:
+Pb_lines_relativised_pool_counts_copies_4FR_ggplot <- ggplot(data=filter(average_relativised_pool_counts_copies_4FR,ratio!="fourfold"), aes(generation,avg_Pb_relative_value)) +
+  #facet_wrap(feature ~ species,nrow=6,ncol=2,scales="free") +
+  facet_grid(. ~ ratio) +
+  geom_point(aes(colour=population),size=2,position=position_dodge(0.8)) + 
+  #ggtitle("Proportion of reads at different NM") +
+  ylab("Derived count relative to Pb-083 4-fold syn.") +
+  scale_y_continuous(breaks = seq(0.6, 1.0, by = 0.1)) +
+  scale_x_discrete(breaks = levels(average_relativised_pool_counts_copies_4FR$generation),limits = c(levels(average_relativised_pool_counts_copies_4FR$generation)[1],"skip",levels(average_relativised_pool_counts_copies_4FR$generation)[c(2:4)],c(rep("skip",3)),levels(average_relativised_pool_counts_copies_4FR$generation)[5])) +
+  #scale_shape_manual(values=c(1,16)) +
+  ylim(0.6,1.2) +
+  ggtitle("Including new mutation") +
+  #guides(colour="none") +
+  theme_bw() +
+  theme(text=element_text(size=9,face="bold"),
+        rect=element_rect(size=1),
+        axis.line=element_line(colour="black"),
+        #axis.title=element_text(size=10,colour="black"),
+        axis.title.x=element_text(size=12),
+        axis.title.y=element_text(size=12),
+        axis.text=element_text(size=8,colour="black"),
+        axis.text.x=element_text(colour="black", angle=-90, vjust=0.5),
+        axis.text.y=element_text(colour="black"),
+        #axis.text.y=element_text(size=24,colour="black",margin=margin(t=0.5,unit="cm")),
+        #axis.title.y=element_text(size=30,margin=margin(r=0.5,unit="cm")),
+        panel.background=element_blank(),
+        panel.border=element_rect(colour="black"),
+        #panel.grid=element_blank(),
+        #panel.grid.major=element_line(colour="grey", linetype="dashed", size=0.4),
+        plot.margin=unit(c(0.5,0.5,0.5,0.5),"cm"),
+        plot.title=element_text(hjust=0.5),
+        #plot.title=element_text(size=36, face="bold", margin=margin(b=0.5, unit="cm")),
+        legend.background=element_rect(linetype="solid", colour="black", size=.5),
+        #legend.justification=c(0,0),
+        legend.key=element_rect(colour="white"),
+        #legend.key.size=unit(1.3,"cm"),
+        #legend.position="none",
+        legend.title=element_blank()
+
+  )
+Pb_lines_relativised_pool_counts_copies_4FR_ggplot
+ggsave(paste0("Pb_lines_relativised_pool_counts_copies_4FR_",type,".two_parsimony.pdf"), width=15, height=12, units="cm", device="pdf", path=wd_path)
+
+```
+
+###Absolute counts:
+####Rarefied:
+#####Derived Pb and line averages (combined version):
+######V sites (V equals the minimum available number across populations):
+```{r Plot variant count results}
+
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(scales)
+
+depth <- 50
+type <- "autosomes" #all #autosomes #Xchr
+
+wd_path <- paste0("/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/all_sites/rarefied/depth",depth,"/")
+pool_counts <- read_tsv(paste0(wd_path,"two_parsimony_rarefied_depth_",depth,"_counts_pool_gen0-140_",type,"_summary.perpop_V_sites.txt")) %>% filter(generation!="gen5",sample!="sample1",sample!="sample10",sample!="sample17")
+
+codes_dictionary <- read_tsv(paste0(wd_path,"pop_codes_dictionary.txt"),col_names=c("old","population"))
+pool_counts <- left_join(pool_counts,codes_dictionary,by=c("sample"="old"))
+pool_counts$population = factor(pool_counts$population,levels=c("Pb","L01","L16","L27","L29","L31","L33","L34","L36","L38","L39","L42","L45","L48","L51","L52","L54","L59","L61","L63"))
+pool_counts$generation <- as.numeric(gsub("gen","",pool_counts$generation))
+pool_counts <- pool_counts %>% arrange(generation)
+pool_counts$generation = factor(pool_counts$generation)
+pool_counts <- pool_counts %>% arrange(population,generation)
+
+pool_counts_copies_absolute <- pool_counts %>% mutate(synonymous=(`non-fourfold_D` + fourfold_D),fourfold=fourfold_D,missense=missense_D,LoF=LoF_D) %>% select(!contains(c("_V","_D","sample"))) %>% gather(count,value,-generation,-population,factor_key=T) %>% mutate(group=ifelse(population=="Pb","Pb","lines"))
+pool_counts_copies_absolute$group = factor(pool_counts_copies_absolute$group,levels=c("Pb","lines"))
+pool_counts_copies_absolute
+
+#Obtain per population averages and standard errors:
+se <- function(x) sqrt(var(x)/length(x)) #first define the standard error function
+
+average_pool_counts_copies_absolute <- data_frame("population"=character(0),"generation"=character(0),"count"=character(0),"avg_value"=character(0),"se_value"=character(0)) #next, create the empty dataframe
+
+for (pop in unique(pool_counts_copies_absolute$group)) { #then loop over each population and feature to get the (relativised) mean and standard error, and feed the dataframe
+  print(pop)
+  for (g in unlist(unique(select(filter(pool_counts_copies_absolute,group==pop),generation)),use.names=F)) {
+  #species <- filter(relativised_pool_counts_copies_4FR,ratio==r & population==pop) %>% select(species) %>% unlist(.,use.names=F) %>% unique()
+    for (r in unique(pool_counts_copies_absolute$count)) {
+      print(r)
+      pop_mean <- filter(pool_counts_copies_absolute,count==r & generation==g & group==pop) %>% select(value) %>% unlist(.,use.names=F) %>% mean()
+      #print(paste0(pop," feature ",r," average is ",pop_mean))
+      pop_se <- filter(pool_counts_copies_absolute,count==r & generation==g & group==pop) %>% select(value) %>% unlist(.,use.names=F) %>% se()
+      #print(paste0(pop," feature ",r," std error is ",pop_se))
+      row_data <- cbind(pop,g,r,pop_mean,pop_se)
+      colnames(row_data) <- c("population","generation","count","avg_value","se_value")
+      average_pool_counts_copies_absolute <- rbind(average_pool_counts_copies_absolute,row_data,stringsAsFactors=F)
+    }
+  }
+}
+average_pool_counts_copies_absolute$population = factor(average_pool_counts_copies_absolute$population,levels=c("Pb","lines"))
+average_pool_counts_copies_absolute$count = factor(average_pool_counts_copies_absolute$count,levels=c("synonymous","fourfold","missense","LoF"))
+average_pool_counts_copies_absolute$generation <- as.factor(as.numeric(average_pool_counts_copies_absolute$generation))
+average_pool_counts_copies_absolute$avg_value <- as.numeric(average_pool_counts_copies_absolute$avg_value)
+average_pool_counts_copies_absolute$se_value <- as.numeric(average_pool_counts_copies_absolute$se_value)
+average_pool_counts_copies_absolute
+#write_tsv(average_relativised_pool_counts_copies_absolute,paste0(wd_path,"/pop_average_relativised_pool_counts_copies_absolute_",type,".txt"))
+
+average_pool_counts_copies_absolute <- average_pool_counts_copies_absolute %>% mutate(y_min=ifelse(count=="synonymous",370000,ifelse(count=="fourfold",NA,ifelse(count=="missense",105000,ifelse(count=="tolerated",108000,ifelse(count=="deleterious",9500,400))))),y_max=ifelse(count=="synonymous",395000,ifelse(count=="fourfold",NA,ifelse(count=="missense",122000,ifelse(count=="tolerated",125000,ifelse(count=="deleterious",11000,620))))))
+
+
+#Combined version:
+Pb_lines_pool_counts_copies_absolute_ggplot <- ggplot(data=filter(average_pool_counts_copies_absolute,count!="fourfold",generation!=5), aes(generation,avg_value)) +
+  #facet_wrap(feature ~ species,nrow=6,ncol=2,scales="free") +
+  facet_wrap(. ~ count, scales="free", nrow = 1) +
+  geom_errorbar(aes(ymin=avg_value-se_value, ymax=avg_value+se_value, colour=generation, group=population), position=position_dodge(0.8),size=0.5,width=0.5) +
+  geom_point(aes(colour=generation,shape=population),size=2,position=position_dodge(0.8)) +
+  geom_blank(aes(y = y_min)) +
+  geom_blank(aes(y = y_max)) +
+  #ggtitle("Proportion of reads at different NM") +
+  ylab("Derived count") +
+  #ylim(-0.1,1.1) +
+  #scale_y_continuous(breaks = seq(0.0, 1.0, by = 0.2), limits=c(0, 1.1)) +
+  scale_x_discrete(breaks = levels(average_pool_counts_copies_absolute$generation),limits = c(levels(average_pool_counts_copies_absolute$generation)[1],"skip",levels(average_pool_counts_copies_absolute$generation)[c(2:4)],c(rep("skip",3)),levels(average_pool_counts_copies_absolute$generation)[5])) +
+  scale_shape_manual(values=c(1,16)) +
+  ggtitle(paste0("Pools, rarefied data (cov. ",depth,")")) +
+  guides(colour="none") +
+  theme_bw() +
+  theme(text=element_text(size=12,face="bold"),
+        rect=element_rect(size=1),
+        axis.line=element_line(colour="black"),
+        axis.title=element_text(size=16),
+        axis.text=element_text(size=10,colour="black"),
+        axis.text.x=element_text(colour="black",size=10),
+        #axis.text.y=element_text(size=24,colour="black",margin=margin(t=0.5,unit="cm")),
+        #axis.title.y=element_text(size=30,margin=margin(r=0.5,unit="cm")),
+        panel.background=element_blank(),
+        panel.border=element_rect(colour="black"),
+        #panel.grid=element_blank(),
+        #panel.grid.major=element_line(colour="grey", linetype="dashed", size=0.4),
+        plot.margin=unit(c(0.5,0.5,0.5,0.5),"cm"),
+        #plot.title=element_text(size=36, face="bold", margin=margin(b=0.5, unit="cm")),
+        legend.background=element_rect(linetype="solid", colour="black", size=.5),
+        #legend.justification=c(0,0),
+        legend.key=element_rect(colour="white"),
+        #legend.key.size=unit(1.3,"cm"),
+        #legend.position="none",
+        legend.title=element_blank()
+  )
+Pb_lines_pool_counts_copies_absolute_ggplot
+ggsave(paste0("rarefied_depth_",depth,"_Pb_lines_pool_counts_copies_absolute_",type,".perpop_V_sites.two_parsimony.pdf"), width=25, height=12, units="cm", device="pdf", path=wd_path)
+
+```
