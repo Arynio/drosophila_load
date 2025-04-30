@@ -6700,11 +6700,11 @@ library(scales)
 
 type <- "all" #all #autosomes #Xchr
 
-wd_path <- ("/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/")
+wd_path <- ("/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/sites_in_Pb000/original_dataset/")
 SFS_raw_data_gen0_40 <- read_tsv(paste0(wd_path,"SFS_pool_gen0-40_combined_",type,"_summary.txt")) %>% mutate(gen=ifelse(sample=="LBT0",000,ifelse(sample=="c1",005,ifelse(sample=="BT20",020,ifelse(sample=="BT30",030,040)))))
 SFS_raw_data_gen140 <- read_tsv(paste0(wd_path,"SFS_pool_gen140_combined_",type,"_summary.txt")) %>% mutate(gen="140" %>% as.double)
 
-SFS_raw_data_combined <- rbind(SFS_raw_data_gen0_40,SFS_raw_data_gen140) %>% select(-af_000,-af_100)
+SFS_raw_data_combined <- rbind(SFS_raw_data_gen0_40,SFS_raw_data_gen140) %>% select(-af_00,-af_10)
 SFS_raw_data_combined$gen = factor(SFS_raw_data_combined$gen)
 SFS_raw_data_combined <- SFS_raw_data_combined %>% rowwise %>% mutate(total= sum(c_across(where(is.numeric)))) #row-wise sum of all numeric columns (the "af" columns; "gen" is excluded if its converted to a factor first.
 codes_dictionary <- read_tsv(paste0(wd_path,"pop_codes_dictionary.txt"),col_names=c("old","population"))
