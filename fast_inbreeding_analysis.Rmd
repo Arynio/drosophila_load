@@ -1076,7 +1076,7 @@ cd two_parsimony_ancestral_dm6
 <!-- diff <(cut -f-2,4- dm6_refGene.txt) <(cut -f-2,4- refGene.txt) #checks whether the previous loop modified any other field. Since no lines are returned, both files are identical (outside of the 3rd column, which was changed). -->
 
 #The following has to be repeated, since the new polarisation means that the ancestral genome has changed:
-#Copy the ancestral fasta (obtained in the polarisation.Rmd script) to the aproppriate folder:
+#Copy the ancestral fasta (obtained above) to the aproppriate folder:
 scp -p /share/rdata/ramon.pouso/reference/indexed_reference/two_parsimony_ancestral-all-chromosome-r6.14.fa dm6_seq/dm6_ancestral_dmel-all-chromosome-r6.14.fa
 
 #Next, use annovar to build the gene database:
@@ -2413,6 +2413,23 @@ for p in ${POOLS[@]}
 
 ```
 
+###Grouped pools.
+####Find valid sites and generate depth tables:
+```{R, engine='bash'}
+
+#In order to obtain this, first it's necessary to build the "all_samples_gen0-6_pool.all.depth_table.txt" file in the "Rarefied counts (regular VCF)" section.
+
+module load gcc/7.2.0
+module add gcc/7.2.0
+
+cd /share/rdata2/dani_k/consanguinidad_rapida/counts/
+
+#Combine the counts for al gen0 pools, and all gen6 pools:
+paste <(head -n1 all_samples_gen0-6_pool.all.depth_table.txt | cut -f-9) <(printf "%s\t%s\n" "combined_gen0" "combined_gen6") > all_samples_gen0-6_pool_grouped.all.depth_table.txt
+tail -n+2 all_samples_gen0-6_pool.all.depth_table.txt | awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$6,$7,$8,$9,($10+$12+$14+$16+$18+$20+$22+$24+$26+$28),($11+$13+$15+$17+$19+$21+$23+$25+$27+$29))}' >> all_samples_gen0-6_pool_grouped.all.depth_table.txt
+
+```
+
 ##Include AF=0:
 ###Regular VCF:
 ```{R, engine='bash'}
@@ -2618,6 +2635,43 @@ for pool in "${POOL_LIST[@]}"
 RECOMBINATION="high" #low #high
 REGION="autosomes" #all #autosomes #Xchr
 scp ramon.pouso@rua2.uvigo.es://share/rdata2/dani_k/consanguinidad_rapida/counts/counts_pool_gen0-6_${REGION}_summary.${RECOMBINATION}_recombination.txt /Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/consanguinidad_rapida/counts/
+
+```
+
+#####Grouped pools, all sites:
+```{R, engine='bash'}
+
+REGION="autosomes" #only available for autosomes
+
+module load gcc/7.2.0
+module add gcc/7.2.0
+cd /share/rdata2/dani_k/consanguinidad_rapida/counts/
+
+rm counts_pool_gen0-6_grouped_${REGION}_summary.txt
+echo -e "sample\tgeneration\tnon-fourfold_V\tnon-fourfold_D\tfourfold_V\tfourfold_D\ttolerated_V\ttolerated_D\tdeleterious_V\tdeleterious_D\tLoF_V\tLoF_D" > counts_pool_gen0-6_grouped_${REGION}_summary.txt
+POOL_COL=($(head -n1 all_samples_gen0-6_pool_grouped.all.depth_table.txt | tr '\t' '\n' | grep -n "combined_gen" | cut -d':' -f1))
+for col in "${POOL_COL[@]}"
+  do
+  echo "${col}"
+  SAMPLE=$(head -n1 all_samples_gen0-6_pool_grouped.all.depth_table.txt | tr '\t' '\n' | head -n$col | tail -n1 | cut -d'_' -f1)
+  GEN=$(head -n1 all_samples_gen0-6_pool_grouped.all.depth_table.txt | tr '\t' '\n' | head -n$col | tail -n1 | cut -d'_' -f2)
+
+  NONFOURFOLD_V=$(grep "CUSTOM=non-fourfold;" all_samples_gen0-6_pool_grouped.all.depth_table.txt | cut -f$col | wc -l)
+  NONFOURFOLD_D=$(grep "CUSTOM=non-fourfold;" all_samples_gen0-6_pool_grouped.all.depth_table.txt | cut -f$col | awk '{print $1}' | paste -sd+ | bc)
+  FOURFOLD_V=$(grep "CUSTOM=fourfold;" all_samples_gen0-6_pool_grouped.all.depth_table.txt | cut -f$col | wc -l)
+  FOURFOLD_D=$(grep "CUSTOM=fourfold;" all_samples_gen0-6_pool_grouped.all.depth_table.txt | cut -f$col | awk '{print $1}' | paste -sd+ | bc)
+  MISTOL_V=$(grep "CUSTOM=tolerated;" all_samples_gen0-6_pool_grouped.all.depth_table.txt | cut -f$col | wc -l)
+  MISTOL_D=$(grep "CUSTOM=tolerated;" all_samples_gen0-6_pool_grouped.all.depth_table.txt | cut -f$col | awk '{print $1}' | paste -sd+ | bc)
+  MISDEL_V=$(grep "CUSTOM=deleterious;" all_samples_gen0-6_pool_grouped.all.depth_table.txt | cut -f$col | wc -l)
+  MISDEL_D=$(grep "CUSTOM=deleterious;" all_samples_gen0-6_pool_grouped.all.depth_table.txt | cut -f$col | awk '{print $1}' | paste -sd+ | bc)
+  LOF_V=$(grep "CUSTOM=LoF;" all_samples_gen0-6_pool_grouped.all.depth_table.txt | cut -f$col | wc -l)
+  LOF_D=$(grep "CUSTOM=LoF;" all_samples_gen0-6_pool_grouped.all.depth_table.txt | cut -f$col | awk '{print $1}' | paste -sd+ | bc)
+  echo -e "$SAMPLE\t$GEN\t$NONFOURFOLD_V\t$NONFOURFOLD_D\t$FOURFOLD_V\t$FOURFOLD_D\t$MISTOL_V\t$MISTOL_D\t$MISDEL_V\t$MISDEL_D\t$LOF_V\t$LOF_D" >> counts_pool_gen0-6_grouped_${REGION}_summary.txt
+  done
+
+#From the local environment:
+REGION="autosomes" #only available for autosomes
+scp ramon.pouso@rua2.uvigo.es://share/rdata2/dani_k/consanguinidad_rapida/counts/counts_pool_gen0-6_grouped_${REGION}_summary.txt /Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/consanguinidad_rapida/counts/
 
 ```
 
@@ -4252,6 +4306,25 @@ for pool in ${POOL_LIST[@]}
 
 ```
 
+####INDELs not multiple of 3:
+```{bash}
+
+DEPTH=50
+
+cd /share/rdata2/dani_k/consanguinidad_rapida/counts/rarefied_counts/depth$DEPTH
+module load gcc/7.2.0
+module add gcc/7.2.0
+
+#Finally, include the other fields:
+POOL_LIST=$(ls pool*gen0-6_pool_INDELs_est-sfs.all.depth_${DEPTH}_valid_mod.average_complete.txt)
+for pool in ${POOL_LIST[@]}
+  do
+  echo "${pool}"
+  bedtools subtract -a "${pool}" -b /share/rdata2/dani_k/consanguinidad_rapida/variants/crisp_all_pools_gen0-6.all_sites.orthologs.confident.exons.INDELs_divisible_by_3.bed -wa -header > ${pool/.txt/.wout_divisible_by_3.txt}
+  done
+
+```
+
 ###Retrieve counts:
 ####Retrieve derived counts per category:
 #####All sites:
@@ -4292,6 +4365,47 @@ for pool in "${POOL_LIST[@]}"
 REGION="all" #all #autosomes #Xchr
 DEPTH=50
 scp ramon.pouso@rua2.uvigo.es://share/rdata2/dani_k/consanguinidad_rapida/counts/rarefied_counts/depth${DEPTH}/rarefied_depth_${DEPTH}_counts_pool_INDELs_est-sfs_gen0-6_${REGION}_summary.txt /Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/consanguinidad_rapida/counts/rarefied/depth${DEPTH}/
+
+```
+
+#####INDELs not multiple of 3:
+```{R, engine='bash'}
+
+REGION="all" #all #autosomes #Xchr
+DEPTH=50
+
+cd /share/rdata2/dani_k/consanguinidad_rapida/counts/rarefied_counts/depth$DEPTH/
+rm rarefied_depth_${DEPTH}_counts_pool_INDELs_est-sfs_gen0-6_${REGION}_summary.wout_divisible_by_3.txt
+echo -e "sample\tgeneration\tinsertion_V\tinsertion_D\tdeletion_V\tdeletion_D" > rarefied_depth_${DEPTH}_counts_pool_INDELs_est-sfs_gen0-6_${REGION}_summary.wout_divisible_by_3.txt
+POOL_LIST=($(ls pool*gen0-6_pool_INDELs_est-sfs.all.depth_${DEPTH}_valid_mod.average_complete.wout_divisible_by_3.txt))
+for pool in "${POOL_LIST[@]}"
+  do
+  echo "${pool}"
+  SAMPLE=$(echo "${pool}" | cut -d'_' -f1)
+  GEN=$(echo "${pool}" | cut -d'_' -f2)
+  if [ $REGION == "autosomes" ]
+    then
+    grep -v "^X" $pool > ${pool/.txt/_${REGION}.txt}
+    p=${pool/.txt/_${REGION}.txt}
+  elif [ $REGION == "Xchr" ]
+    then
+    grep "^X" $pool > ${pool/.txt/_${REGION}.txt}
+    p=${pool/.txt/_${REGION}.txt}
+  elif [ $REGION == "all" ]
+    then
+    p=${pool}
+  fi
+  INSERTION_V=$(grep ";VT=INSERTION;" $p | awk '$11 > 0' | wc -l)
+  INSERTION_D=$(grep ";VT=INSERTION;" $p | awk '{print $11}' | paste -sd+ | bc)
+  DELETION_V=$(grep ";VT=DELETION;" $p | awk '$11 > 0' | wc -l)
+  DELETION_D=$(grep ";VT=DELETION;" $p | awk '{print $11}' | paste -sd+ | bc)
+  echo -e "$SAMPLE\t$GEN\t$INSERTION_V\t$INSERTION_D\t$DELETION_V\t$DELETION_D" >> rarefied_depth_${DEPTH}_counts_pool_INDELs_est-sfs_gen0-6_${REGION}_summary.wout_divisible_by_3.txt
+  done
+
+#From the local environment:
+REGION="all" #all #autosomes #Xchr
+DEPTH=50
+scp ramon.pouso@rua2.uvigo.es://share/rdata2/dani_k/consanguinidad_rapida/counts/rarefied_counts/depth${DEPTH}/rarefied_depth_${DEPTH}_counts_pool_INDELs_est-sfs_gen0-6_${REGION}_summary.wout_divisible_by_3.txt /Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/consanguinidad_rapida/counts/rarefied/depth${DEPTH}/
 
 ```
 
@@ -4898,6 +5012,122 @@ ggsave(paste0("gen0seg_rarefied_depth_",depth,"_pool_avg_counts_copies_",type,".
 ```
 
 ###Derived count ratios (relative to 4fold and gen0):
+####Total (non-rarefied) data:
+#####Whole dataset:
+######Fourfold relative:
+```{r Plot variant count results}
+
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(scales)
+
+
+#Define variables and read raw counts file:
+type <- "autosomes" #all #autosomes #Xchr
+
+wd_path <- paste0("/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/consanguinidad_rapida/counts/")
+pool_counts <- read_tsv(paste0(wd_path,"counts_pool_gen0-6_grouped_",type,"_summary.txt")) %>% rename(population = sample)
+
+pool_counts$population = factor(pool_counts$population)
+pool_counts$generation <- as.numeric(gsub("gen","",pool_counts$generation))
+pool_counts <- pool_counts %>% arrange(generation)
+pool_counts$generation = factor(pool_counts$generation)
+pool_counts <- pool_counts %>% arrange(population,generation)
+
+#Relativise by fourfold category:
+pool_counts_copies_4FR <- pool_counts %>% mutate(fourfold=fourfold_D/fourfold_D,tolerated=tolerated_D/fourfold_D,deleterious=deleterious_D/fourfold_D,LoF=LoF_D/fourfold_D) %>% select(!contains(c("_V","_D","sample"))) %>% gather(ratio,value,-generation,-population,factor_key=T)
+pool_counts_copies_4FR
+
+#Relativise by generation 0:
+r_average_vector <- c()
+for (r in unique(pool_counts_copies_4FR$ratio)) {
+  print(r)
+  for (p in unique(pool_counts_copies_4FR$population)) {
+    r_average <- filter(pool_counts_copies_4FR,r==ratio & population==p & generation==0) %>% select(value) %>% unlist(.,use.names=F)
+    r_average_vector <- c(r_average_vector,rep(r_average,2))
+  }
+}
+print(r_average_vector)
+relativised_pool_counts_copies_4FR <- mutate(pool_counts_copies_4FR, gen0_relative_value=value/r_average_vector)
+
+#Obtain per population averages and standard errors:
+se <- function(x) sqrt(var(x)/length(x)) #first define the standard error function
+average_relativised_pool_counts_copies_4FR <- data_frame("generation"=character(0),"ratio"=character(0),"avg_value"=character(0),"se_value"=character(0)) #next, create the empty dataframe
+for (g in unique(relativised_pool_counts_copies_4FR$generation)) {
+#species <- filter(relativised_pool_counts_copies_4FR,ratio==r & population==pop) %>% select(species) %>% unlist(.,use.names=F) %>% unique()
+  for (r in unique(relativised_pool_counts_copies_4FR$ratio)) {
+    print(r)
+    pop_mean <- filter(relativised_pool_counts_copies_4FR,ratio==r & generation==g) %>% select(gen0_relative_value) %>% unlist(.,use.names=F) %>% mean()
+    #print(paste0(pop," feature ",r," average is ",pop_mean))
+    pop_se <- filter(relativised_pool_counts_copies_4FR,ratio==r & generation==g) %>% select(gen0_relative_value) %>% unlist(.,use.names=F) %>% se()
+    #print(paste0(pop," feature ",r," std error is ",pop_se))
+    row_data <- cbind(g,r,pop_mean,pop_se)
+    colnames(row_data) <- c("generation","ratio","avg_value","se_value")
+    average_relativised_pool_counts_copies_4FR <- rbind(average_relativised_pool_counts_copies_4FR,row_data,stringsAsFactors=F)
+  }
+}
+average_relativised_pool_counts_copies_4FR$ratio = factor(average_relativised_pool_counts_copies_4FR$ratio,levels=c("fourfold","tolerated","deleterious","LoF"))
+average_relativised_pool_counts_copies_4FR$generation <- as.factor(as.numeric(average_relativised_pool_counts_copies_4FR$generation))
+average_relativised_pool_counts_copies_4FR$avg_value <- as.numeric(average_relativised_pool_counts_copies_4FR$avg_value)
+average_relativised_pool_counts_copies_4FR$se_value <- as.numeric(average_relativised_pool_counts_copies_4FR$se_value)
+average_relativised_pool_counts_copies_4FR
+
+#Relativise by the average of generation 0:
+r_average_vector <- c()
+for (r in unique(pool_counts_copies_4FR$ratio)) {
+  print(r)
+  for (gen in unique(pool_counts_copies_4FR$generation)) {
+    r_average <- filter(pool_counts_copies_4FR,r==ratio & generation==0) %>% select(value) %>% unlist(.,use.names=F) %>% mean()
+    r_average_vector <- c(r_average_vector,rep(r_average,length(levels(pool_counts_copies_4FR$population))))
+  }
+}
+print(r_average_vector)
+avg_relativised_pool_counts_copies_4FR <- mutate(pool_counts_copies_4FR, avg_gen0_relative_value=value/r_average_vector)
+
+
+#Average version:
+average_relativised_pool_counts_copies_4FR_ggplot <- ggplot(data=filter(average_relativised_pool_counts_copies_4FR,ratio!="fourfold"), aes(generation,avg_value)) +
+  #facet_wrap(feature ~ species,nrow=6,ncol=2,scales="free") +
+  facet_grid(. ~ ratio) +
+  geom_errorbar(aes(ymin=avg_value-2*se_value, ymax=avg_value+2*se_value, colour=generation),size=0.5,width=0.5) +
+  geom_point(aes(colour=generation),size=2) + 
+  ylab("Derived count relative to 4-fold syn. and gen 0") +
+  xlab("Generation") +
+  ylim(0.6,1.2) +
+  scale_y_continuous(breaks = seq(0.8, 1.2, by = 0.1), limits=c(0.78, 1.22)) +
+  #scale_shape_manual(values=c(1,16)) +
+  ggtitle(paste0("Combined pools")) +
+  guides(colour="none") +
+  theme_bw() +
+  theme(text=element_text(size=12,face="bold"),
+        rect=element_rect(size=1),
+        axis.line=element_line(colour="black"),
+        axis.title=element_text(size=12),
+        axis.text=element_text(size=10,colour="black"),
+        axis.text.x=element_text(colour="black",size=10),
+        #axis.text.y=element_text(size=24,colour="black",margin=margin(t=0.5,unit="cm")),
+        #axis.title.y=element_text(size=30,margin=margin(r=0.5,unit="cm")),
+        panel.background=element_blank(),
+        panel.border=element_rect(colour="black"),
+        #panel.grid=element_blank(),
+        #panel.grid.major=element_line(colour="grey", linetype="dashed", size=0.4),
+        plot.margin=unit(c(0.5,0.5,0.5,0.5),"cm"),
+        plot.title=element_text(size=12, face="bold", margin=margin(b=0.5, unit="cm")),
+        legend.background=element_rect(linetype="solid", colour="black", size=.5),
+        #legend.justification=c(0,0),
+        legend.key=element_rect(colour="white"),
+        #legend.key.size=unit(1.3,"cm"),
+        #legend.position="none",
+        legend.title=element_blank()
+  )
+average_relativised_pool_counts_copies_4FR_ggplot
+ggsave(paste0("grouped_pool_avg_relativised_counts_copies_4FR_",type,".pdf"), width=15, height=12, units="cm", device="pdf", path=wd_path)
+
+
+```
+
 ####Rarefied data:
 #####Whole dataset:
 ######Fourfold relative:
@@ -10102,6 +10332,213 @@ sep_avg_relativised_pool_counts_copies_4FR_ggplot
 ggsave(paste0("rarefied_depth_",depth,"_pool_sep_avg0_relativised_counts_copies_4FR_",type,".INDELs_est-sfs.pdf"), width=15, height=12, units="cm", device="pdf", path=wd_path)
 
 ```
+
+#####INDELs not multiple of 3:
+######Fourfold relative:
+```{r Plot variant count results}
+
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(scales)
+
+
+#Define variables and read raw counts file:
+depth <- 50
+type <- "autosomes" #all #autosomes #Xchr
+
+wd_path <- paste0("/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/consanguinidad_rapida/counts/rarefied/depth",depth,"/")
+pool_counts <- read_tsv(paste0(wd_path,"rarefied_depth_",depth,"_counts_pool_gen0-6_",type,"_summary.txt")) %>% rename(population = sample)
+
+pool_counts$population = factor(pool_counts$population)
+pool_counts$generation <- as.numeric(gsub("gen","",pool_counts$generation))
+pool_counts <- pool_counts %>% arrange(generation)
+pool_counts$generation = factor(pool_counts$generation)
+pool_counts <- pool_counts %>% arrange(population,generation)
+
+alt_counts <- read_tsv(paste0(wd_path,"rarefied_depth_",depth,"_counts_pool_INDELs_est-sfs_gen0-6_",type,"_summary.wout_divisible_by_3.txt")) %>% rename(population = sample)
+
+alt_counts$population = factor(alt_counts$population)
+alt_counts$generation <- as.numeric(gsub("gen","",alt_counts$generation))
+alt_counts <- alt_counts %>% arrange(generation)
+alt_counts$generation = factor(alt_counts$generation)
+alt_counts <- alt_counts %>% arrange(population,generation)
+
+pool_counts <- merge(pool_counts,alt_counts)
+
+#Relativise by fourfold category:
+pool_counts_copies_4FR <- pool_counts %>% mutate(fourfold=fourfold_D/fourfold_D,insertion_rfd=insertion_D/fourfold_D,deletion_rfd=deletion_D/fourfold_D) %>% select(!contains(c("_V","_D","sample"))) %>% gather(ratio,value,-generation,-population,factor_key=T)
+pool_counts_copies_4FR
+
+#Relativise by generation 0:
+r_average_vector <- c()
+for (r in unique(pool_counts_copies_4FR$ratio)) {
+  print(r)
+  for (p in unique(pool_counts_copies_4FR$population)) {
+    r_average <- filter(pool_counts_copies_4FR,r==ratio & population==p & generation==0) %>% select(value) %>% unlist(.,use.names=F)
+    r_average_vector <- c(r_average_vector,rep(r_average,2))
+  }
+}
+print(r_average_vector)
+relativised_pool_counts_copies_4FR <- mutate(pool_counts_copies_4FR, gen0_relative_value=value/r_average_vector)
+
+#Obtain per population averages and standard errors:
+se <- function(x) sqrt(var(x)/length(x)) #first define the standard error function
+average_relativised_pool_counts_copies_4FR <- data_frame("generation"=character(0),"ratio"=character(0),"avg_value"=character(0),"se_value"=character(0)) #next, create the empty dataframe
+for (g in unique(relativised_pool_counts_copies_4FR$generation)) {
+#species <- filter(relativised_pool_counts_copies_4FR,ratio==r & population==pop) %>% select(species) %>% unlist(.,use.names=F) %>% unique()
+  for (r in unique(relativised_pool_counts_copies_4FR$ratio)) {
+    print(r)
+    pop_mean <- filter(relativised_pool_counts_copies_4FR,ratio==r & generation==g) %>% select(gen0_relative_value) %>% unlist(.,use.names=F) %>% mean()
+    #print(paste0(pop," feature ",r," average is ",pop_mean))
+    pop_se <- filter(relativised_pool_counts_copies_4FR,ratio==r & generation==g) %>% select(gen0_relative_value) %>% unlist(.,use.names=F) %>% se()
+    #print(paste0(pop," feature ",r," std error is ",pop_se))
+    row_data <- cbind(g,r,pop_mean,pop_se)
+    colnames(row_data) <- c("generation","ratio","avg_value","se_value")
+    average_relativised_pool_counts_copies_4FR <- rbind(average_relativised_pool_counts_copies_4FR,row_data,stringsAsFactors=F)
+  }
+}
+average_relativised_pool_counts_copies_4FR$ratio = factor(average_relativised_pool_counts_copies_4FR$ratio,levels=c("fourfold","insertion_rfd","deletion_rfd"))
+average_relativised_pool_counts_copies_4FR$generation <- as.factor(as.numeric(average_relativised_pool_counts_copies_4FR$generation))
+average_relativised_pool_counts_copies_4FR$avg_value <- as.numeric(average_relativised_pool_counts_copies_4FR$avg_value)
+average_relativised_pool_counts_copies_4FR$se_value <- as.numeric(average_relativised_pool_counts_copies_4FR$se_value)
+average_relativised_pool_counts_copies_4FR
+
+#Relativise by the average of generation 0:
+r_average_vector <- c()
+for (r in unique(pool_counts_copies_4FR$ratio)) {
+  print(r)
+  for (gen in unique(pool_counts_copies_4FR$generation)) {
+    r_average <- filter(pool_counts_copies_4FR,r==ratio & generation==0) %>% select(value) %>% unlist(.,use.names=F) %>% mean()
+    r_average_vector <- c(r_average_vector,rep(r_average,length(levels(pool_counts_copies_4FR$population))))
+  }
+}
+print(r_average_vector)
+avg_relativised_pool_counts_copies_4FR <- mutate(pool_counts_copies_4FR, avg_gen0_relative_value=value/r_average_vector)
+
+
+#Average version:
+average_relativised_pool_counts_copies_4FR_ggplot <- ggplot(data=filter(average_relativised_pool_counts_copies_4FR,ratio!="fourfold"), aes(generation,avg_value)) +
+  #facet_wrap(feature ~ species,nrow=6,ncol=2,scales="free") +
+  facet_grid(. ~ ratio) +
+  geom_errorbar(aes(ymin=avg_value-2*se_value, ymax=avg_value+2*se_value, colour=generation),size=0.5,width=0.5) +
+  geom_point(aes(colour=generation),size=2) + 
+  #ggtitle("Proportion of reads at different NM") +
+  ylab("Derived count relative to 4-fold syn. and gen 0") +
+  xlab("Generation") +
+  ylim(0.6,1.2) +
+  scale_y_continuous(breaks = seq(0.8, 1.2, by = 0.1), limits=c(0.78, 1.22)) +
+  #scale_shape_manual(values=c(1,16)) +
+  ggtitle(paste0("Average of pools, rarefied data (cov. ",depth,")")) +
+  guides(colour="none") +
+  theme_bw() +
+  theme(text=element_text(size=12,face="bold"),
+        rect=element_rect(size=1),
+        axis.line=element_line(colour="black"),
+        axis.title=element_text(size=12),
+        axis.text=element_text(size=10,colour="black"),
+        axis.text.x=element_text(colour="black",size=10),
+        #axis.text.y=element_text(size=24,colour="black",margin=margin(t=0.5,unit="cm")),
+        #axis.title.y=element_text(size=30,margin=margin(r=0.5,unit="cm")),
+        panel.background=element_blank(),
+        panel.border=element_rect(colour="black"),
+        #panel.grid=element_blank(),
+        #panel.grid.major=element_line(colour="grey", linetype="dashed", size=0.4),
+        plot.margin=unit(c(0.5,0.5,0.5,0.5),"cm"),
+        plot.title=element_text(size=12, face="bold", margin=margin(b=0.5, unit="cm")),
+        legend.background=element_rect(linetype="solid", colour="black", size=.5),
+        #legend.justification=c(0,0),
+        legend.key=element_rect(colour="white"),
+        #legend.key.size=unit(1.3,"cm"),
+        #legend.position="none",
+        legend.title=element_blank()
+  )
+average_relativised_pool_counts_copies_4FR_ggplot
+ggsave(paste0("rarefied_depth_",depth,"_pool_avg_relativised_counts_copies_4FR_",type,".INDELs_est-sfs.wout_divisible_by_3.pdf"), width=15, height=12, units="cm", device="pdf", path=wd_path)
+
+
+#Each line separate version, all gen0 values at 1:
+average_relativised_pool_counts_copies_4FR_ggplot <- ggplot(data=filter(relativised_pool_counts_copies_4FR,ratio!="fourfold"), aes(population,gen0_relative_value)) +
+  #facet_wrap(feature ~ species,nrow=6,ncol=2,scales="free") +
+  facet_grid(. ~ ratio) +
+  #geom_errorbar(aes(ymin=avg_value-2*se_value, ymax=avg_value+2*se_value, colour=generation),size=0.5,width=0.5) +
+  geom_point(aes(colour=generation,shape=generation),size=2) + 
+  #ggtitle("Proportion of reads at different NM") +
+  ylab("Derived count relative to 4-fold syn. and gen 0") +
+  xlab("Generation") +
+  #ylim(0.8,1.1) +
+  scale_y_continuous(breaks = seq(0.8, 1.2, by = 0.1), limits=c(0.78, 1.22)) +
+  scale_shape_manual(values=c(1,16)) +
+  ggtitle(paste0("Separate pools, rarefied data (cov. ",depth,")")) +
+  #guides(colour="none") +
+  theme_bw() +
+  theme(text=element_text(size=12,face="bold"),
+        rect=element_rect(size=1),
+        axis.line=element_line(colour="black"),
+        axis.title=element_text(size=12),
+        axis.text=element_text(size=10,colour="black"),
+        axis.text.x=element_text(colour="black",size=10, angle=90, vjust=0.5),
+        #axis.text.y=element_text(size=24,colour="black",margin=margin(t=0.5,unit="cm")),
+        #axis.title.y=element_text(size=30,margin=margin(r=0.5,unit="cm")),
+        panel.background=element_blank(),
+        panel.border=element_rect(colour="black"),
+        #panel.grid=element_blank(),
+        #panel.grid.major=element_line(colour="grey", linetype="dashed", size=0.4),
+        plot.margin=unit(c(0.5,0.5,0.5,0.5),"cm"),
+        plot.title=element_text(size=12, face="bold", margin=margin(b=0.5, unit="cm")),
+        legend.background=element_rect(linetype="solid", colour="black", size=.5),
+        #legend.justification=c(0,0),
+        legend.key=element_rect(colour="white"),
+        #legend.key.size=unit(1.3,"cm"),
+        #legend.position="none",
+        legend.title=element_blank()
+  )
+average_relativised_pool_counts_copies_4FR_ggplot
+ggsave(paste0("rarefied_depth_",depth,"_pool_sep_relativised_counts_copies_4FR_",type,".INDELs_est-sfs.wout_divisible_by_3.pdf"), width=15, height=12, units="cm", device="pdf", path=wd_path)
+
+
+#Each line separate version, relativised by the average of gen0:
+sep_avg_relativised_pool_counts_copies_4FR_ggplot <- ggplot(data=filter(avg_relativised_pool_counts_copies_4FR,ratio!="fourfold"), aes(population,avg_gen0_relative_value)) +
+  #facet_wrap(feature ~ species,nrow=6,ncol=2,scales="free") +
+  facet_grid(. ~ ratio) +
+  #geom_errorbar(aes(ymin=avg_value-2*se_value, ymax=avg_value+2*se_value, colour=generation),size=0.5,width=0.5) +
+  geom_point(aes(colour=generation,shape=generation),size=2) + 
+  #ggtitle("Proportion of reads at different NM") +
+  ylab("Derived count relative to 4-fold syn. and the gen 0 avg.") +
+  xlab("Generation") +
+  #ylim(0.8,1.1) +
+  scale_y_continuous(breaks = seq(0.8, 1.2, by = 0.1), limits=c(0.78, 1.22)) +
+  scale_shape_manual(values=c(1,16)) +
+  ggtitle(paste0("Separate pools, rarefied data (cov. ",depth,")")) +
+  #guides(colour="none") +
+  theme_bw() +
+  theme(text=element_text(size=12,face="bold"),
+        rect=element_rect(size=1),
+        axis.line=element_line(colour="black"),
+        axis.title=element_text(size=12),
+        axis.text=element_text(size=10,colour="black"),
+        axis.text.x=element_text(colour="black",size=10, angle=90, vjust=0.5),
+        #axis.text.y=element_text(size=24,colour="black",margin=margin(t=0.5,unit="cm")),
+        #axis.title.y=element_text(size=30,margin=margin(r=0.5,unit="cm")),
+        panel.background=element_blank(),
+        panel.border=element_rect(colour="black"),
+        #panel.grid=element_blank(),
+        #panel.grid.major=element_line(colour="grey", linetype="dashed", size=0.4),
+        plot.margin=unit(c(0.5,0.5,0.5,0.5),"cm"),
+        plot.title=element_text(size=12, face="bold", margin=margin(b=0.5, unit="cm")),
+        legend.background=element_rect(linetype="solid", colour="black", size=.5),
+        #legend.justification=c(0,0),
+        legend.key=element_rect(colour="white"),
+        #legend.key.size=unit(1.3,"cm"),
+        #legend.position="none",
+        legend.title=element_blank()
+  )
+sep_avg_relativised_pool_counts_copies_4FR_ggplot
+ggsave(paste0("rarefied_depth_",depth,"_pool_sep_avg0_relativised_counts_copies_4FR_",type,".INDELs_est-sfs.wout_divisible_by_3.pdf"), width=15, height=12, units="cm", device="pdf", path=wd_path)
+
+```
+
 
 #X. Carry out additional analyses:
 ##Explore coverage and mapping quality:
