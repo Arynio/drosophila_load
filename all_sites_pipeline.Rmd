@@ -5241,7 +5241,7 @@ scp ramon.pouso@rua2.uvigo.es://share/rdata/ramon.pouso/POOLS/all_gens_0_140/cou
 
 ```
 
-###V as the minimum available number across populations:
+###!FINAL METHOD: V as the minimum available number across populations:
 ####Find number V:
 ```{R, engine='bash'}
 
@@ -5339,7 +5339,7 @@ for category in ${ANN_CATEGORIES[@]}
 
 ```
 
-####Generate rarefied counts:
+####Generate rarefied counts (without redrawing sites between iterations):
 #####Lines:
 ######rarefied_counts.perpop_V_sites.lines.sh
 ```{R, engine='bash'}
@@ -5441,7 +5441,110 @@ qsub -cwd -l h=compute-0-9 -t 1-$POOL_N /share/rdata/ramon.pouso/POOLS/all_gens_
 
 ```
 
-####Obtain the average rarefied values:
+####!Generate rarefied counts (redrawing sites between iterations):
+#####Lines:
+######rarefied_counts.perpop_V_sites.lines.sh
+```{R, engine='bash'}
+
+export PATH=$PATH:/share/apps/bedtools2/bin:/share/apps/est-sfs-release-2.03/:/share/apps/BAMTOOLS/bin:/share/apps/bedtools2/bin
+module load gcc/7.2.0
+module add gcc/7.2.0
+
+DEPTH=$1
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/
+POOL=$(ls *gen0-140_pool.all.txt | grep "sample" | grep -Ev 'sample1_|sample10_|sample17_' | cut -d'_' -f1-2 | uniq | head -n$SGE_TASK_ID | tail -n1)
+echo $POOL
+POOL_FILE=$(ls *gen0-140_pool.all.txt | grep "^${POOL}_")
+COL=$(head -n1 all_samples_gen0-140_pool.all.depth_table.txt | cut -f10- | tr "\t" "\n" | grep -n "^$POOL" | cut -d':' -f1 | awk '{for (i=1; i<=NF; i++) $i += 9} 1')
+#POOLS=$(ls *gen0-140_pool.all.txt | grep "^${POP}_")
+#FIELDS=$(echo $COLS | tr " " "-")
+
+ANN_CATEGORIES=$(head -n1 all_samples_gen0-140_pool.autosomes.depth_table.perpop_mindepth_${DEPTH}.txt | cut -f2- | tr "\t" "\n")
+for boot in {1..100}
+  do
+  N_BOOT=$(printf "%03d" ${boot})
+  #echo $N_BOOT
+  for category in ${ANN_CATEGORIES[@]}
+    do
+    #echo "${category}"
+    V_CAT=$(awk -v categ=$category '$1==categ' all_samples_gen0-140_pool.autosomes.min_V.perpop_mindepth_${DEPTH}.txt | cut -f3)
+    grep "CUSTOM=$category;" all_samples_gen0-140_pool.all.depth_table.txt | grep -v "^X" | cut -f-9,$COL | awk -v depth=$DEPTH '($10 >= depth)' | sort -k1,1 -k2,2n -u | shuf -n$V_CAT | sort -k1,1 -k2,2n -u | cut -f-3 > ${POOL}.autosomes.perpop_V_sites.boot_${N_BOOT}.ann_cat_${category}.bed
+    sort -k1,1 -k2,2n -u ${POOL_FILE/.txt/_mod.txt} | bedtools intersect -a stdin -b ${POOL}.autosomes.perpop_V_sites.boot_${N_BOOT}.ann_cat_${category}.bed | awk -v depth=$DEPTH -F"\t" 'BEGIN {"date +%N" | getline seed; srand(seed);} {if($8 >= depth) {printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t", $1,$2,$3,$4,$5,$6,$7,$8); len=length($9); for(i=1;i<=depth;) {k=int(rand()*len)+1; if(!(k in N)) {N[k]; printf "%s", substr($9,k,1); i++;}} split("", N); print ""} else {print}}' | awk -v categ=$category -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$6,$7,$8,$9,gsub($4, "", $9),gsub($5, "", $9),categ)}' > ./rarefied_counts/depth${DEPTH}/${POOL_FILE/.all.txt/.autosomes.perpop_V_sites.boot_${N_BOOT}.ann_cat_$category.txt}
+    #rm ${POOL}.autosomes.perpop_V_sites.boot_${N_BOOT}.ann_cat_${category}.bed
+    done
+  cat ./rarefied_counts/depth${DEPTH}/${POOL_FILE/.all.txt/.autosomes.perpop_V_sites.boot_${N_BOOT}.ann_cat*.txt} | sort -k1,1 -k2,2n -u > ./rarefied_counts/depth${DEPTH}/${POOL_FILE/.all.txt/.autosomes.perpop_V_sites.boot_${N_BOOT}.txt}
+  #rm ./rarefied_counts/depth${DEPTH}/${POOL_FILE/.all.txt/.autosomes.perpop_V_sites.boot_${N_BOOT}.ann_cat*.txt}
+  done
+
+#Save this code as: /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/rarefied_counts.perpop_V_sites.lines.sh
+
+```
+
+######Send the array-jobs:
+```{R, engine='bash'}
+
+#Run it as follows:
+DEPTH=50 #Input the desired target depth
+mkdir -p /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/depth${DEPTH} 
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/
+
+POOL_N=$(ls *gen0-140_pool.all.txt | grep "sample" | grep -Ev 'sample1_|sample10_|sample17_' | cut -d'_' -f1-2 | uniq | wc -l)
+qsub -cwd -l h=compute-0-9 -t 1-$POOL_N /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/rarefied_counts.perpop_V_sites.lines.sh $DEPTH
+
+```
+
+#####Pb:
+######rarefied_counts.perpop_V_sites.Pb.sh
+```{R, engine='bash'}
+
+export PATH=$PATH:/share/apps/bedtools2/bin:/share/apps/est-sfs-release-2.03/:/share/apps/BAMTOOLS/bin:/share/apps/bedtools2/bin
+module load gcc/7.2.0
+module add gcc/7.2.0
+
+DEPTH=$1
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/
+POOL=$(ls *gen0-140_pool.all.txt | grep -Ev "sample|gen5" | cut -d'_' -f1-2 | head -n$SGE_TASK_ID | tail -n1)
+echo $POOL
+POOL_FILE=$(ls *gen0-140_pool.all.txt | grep "^${POOL}_")
+COL=$(head -n1 all_samples_gen0-140_pool.all.depth_table.txt | cut -f10- | tr "\t" "\n" | grep -v "^sample" | grep -n "^$POOL" | cut -d':' -f1 | awk '{for (i=1; i<=NF; i++) $i += 9} 1')
+#COLS=$(head -n1 all_samples_gen0-140_pool.all.depth_table.txt | cut -f10- | tr "\t" "\n" | grep -nv "^sample" | cut -d':' -f1 | awk '{for (i=1; i<=NF; i++) $i += 9} 1')
+#FIELDS=$(echo $COLS | cut -d' ' -f1,5 | tr " " "-")
+
+ANN_CATEGORIES=$(head -n1 all_samples_gen0-140_pool.autosomes.depth_table.perpop_mindepth_${DEPTH}.txt | cut -f2- | tr "\t" "\n")
+for boot in {1..100}
+  do
+  N_BOOT=$(printf "%03d" ${boot})
+  #echo $N_BOOT
+  for category in ${ANN_CATEGORIES[@]}
+    do
+    #echo "${category}"
+    V_CAT=$(awk -v categ=$category '$1==categ' all_samples_gen0-140_pool.autosomes.min_V.perpop_mindepth_${DEPTH}.txt | cut -f3)
+    grep "CUSTOM=$category;" all_samples_gen0-140_pool.all.depth_table.txt | grep -v "^X" | cut -f-9,$COL | awk -v depth=$DEPTH '($10 >= depth)' | sort -k1,1 -k2,2n -u | shuf -n$V_CAT | sort -k1,1 -k2,2n -u | cut -f-3 > ${POOL}.autosomes.perpop_V_sites.boot_${N_BOOT}.ann_cat_${category}.bed
+    sort -k1,1 -k2,2n -u ${POOL_FILE/.txt/_mod.txt} | bedtools intersect -a stdin -b ${POOL}.autosomes.perpop_V_sites.boot_${N_BOOT}.ann_cat_${category}.bed | awk -v depth=$DEPTH -F"\t" 'BEGIN {"date +%N" | getline seed; srand(seed);} {if($8 >= depth) {printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t", $1,$2,$3,$4,$5,$6,$7,$8); len=length($9); for(i=1;i<=depth;) {k=int(rand()*len)+1; if(!(k in N)) {N[k]; printf "%s", substr($9,k,1); i++;}} split("", N); print ""} else {print}}' | awk -v categ=$category -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$6,$7,$8,$9,gsub($4, "", $9),gsub($5, "", $9),categ)}' > ./rarefied_counts/depth${DEPTH}/${POOL_FILE/.all.txt/.autosomes.perpop_V_sites.boot_${N_BOOT}.ann_cat_$category.txt}
+    #rm ${POOL}.autosomes.perpop_V_sites.boot_${N_BOOT}.ann_cat_${category}.bed
+    done
+  cat ./rarefied_counts/depth${DEPTH}/${POOL_FILE/.all.txt/.autosomes.perpop_V_sites.boot_${N_BOOT}.ann_cat*.txt} | sort -k1,1 -k2,2n -u > ./rarefied_counts/depth${DEPTH}/${POOL_FILE/.all.txt/.autosomes.perpop_V_sites.boot_${N_BOOT}.txt}
+  #rm ./rarefied_counts/depth${DEPTH}/${POOL_FILE/.all.txt/.autosomes.perpop_V_sites.boot_${N_BOOT}.ann_cat*.txt}
+  done
+
+#Save this code as: /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/rarefied_counts.perpop_V_sites.Pb.sh
+
+```
+
+######Send the array-jobs:
+```{R, engine='bash'}
+
+#Run it as follows:
+DEPTH=50 #Input the desired target depth
+mkdir -p /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/depth${DEPTH} 
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/
+
+POOL_N=$(ls *gen0-140_pool.all.txt | grep -Ev "sample|gen5" | wc -l)
+qsub -cwd -l h=compute-0-9 -t 1-$POOL_N /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/rarefied_counts.perpop_V_sites.Pb.sh $DEPTH
+
+```
+
+####Obtain the summation of rarefied values across iterations:
 #####detailed_counts.perpop_V_sites.sh
 ```{R, engine='bash'}
 
@@ -5473,7 +5576,7 @@ for boot in {1..100}
 ```{R, engine='bash'}
 
 #Run it as follows:
-DEPTH=60 #Input the desired target depth
+DEPTH=50 #Input the desired target depth
 cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/
 
 POOL_N=$(ls *gen0-140_pool.all.txt | grep -Ev 'gen5_|sample1_|sample10_|sample17_' | wc -l)
@@ -5481,8 +5584,11 @@ qsub -cwd -l h=compute-0-9 -t 1-$POOL_N /share/rdata/ramon.pouso/POOLS/all_gens_
 
 ```
 
-####Alternative average rarefied values for the bootstrap:
+
+####WRONG! Alternative average rarefied values for the bootstrap:
 ```{R, engine='bash'}
+
+#THIS IS WRONG! Because sites are different in each iteration. But here I'm obtaining averages as if they were the same. They are only the same in Pb, and that's due to a previous mistake.
 
 DEPTH=50
 N_BOOT=100
@@ -5502,7 +5608,7 @@ rm ${POOL/.perpop_V_sites/.perpop_V_sites.Nboot_${N_BOOT}.list}
 
 ```
 
-####Retrieve derived counts per category:
+####Retrieve average derived counts per category:
 ```{R, engine='bash'}
 
 REGION="autosomes" #all #autosomes #Xchr
@@ -5533,8 +5639,44 @@ for pool in "${POOL_LIST[@]}"
 
 #From the local environment:
 REGION="autosomes" #all #autosomes #Xchr
-DEPTH=60
+DEPTH=50
 scp ramon.pouso@rua2.uvigo.es://share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/depth${DEPTH}/rarefied_depth_${DEPTH}_counts_pool_gen0-140_${REGION}_summary.perpop_V_sites.txt /Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/all_sites/rarefied/depth${DEPTH}/
+
+```
+
+####Retrieve standard deviation derived counts per category:
+```{R, engine='bash'}
+
+REGION="autosomes" #all #autosomes #Xchr
+DEPTH=50
+N_BOOT=100
+
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/depth$DEPTH/
+rm rarefied_depth_${DEPTH}_counts_pool_gen0-140_${REGION}_std_dev.perpop_V_sites.txt
+echo -e "sample\tgeneration\tnon-fourfold_V\tnon-fourfold_D\tfourfold_V\tfourfold_D\ttolerated_V\ttolerated_D\tdeleterious_V\tdeleterious_D\tLoF_V\tLoF_D" > rarefied_depth_${DEPTH}_counts_pool_gen0-140_${REGION}_std_dev.perpop_V_sites.txt
+POOL_LIST=($(ls *_gen0-140_pool.$REGION.perpop_V_sites.detailed_counts.txt))
+for pool in "${POOL_LIST[@]}"
+  do
+  echo "${pool}"
+  SAMPLE=$(echo "${pool}" | cut -d'_' -f1)
+  GEN=$(echo "${pool}" | cut -d'_' -f2)
+  NONFOURFOLD_V=0
+  NONFOURFOLD_D=$(awk -v categ="non-fourfold" -v boot=$N_BOOT '$2==categ {sum+=$3; sumsq+=$3*$3} END {var=(sumsq-(sum*sum)/boot)/(boot-1); sd=sqrt(var); printf ("%.3f\n", sd)}' $pool)
+  FOURFOLD_V=0
+  FOURFOLD_D=$(awk -v categ="fourfold" -v boot=$N_BOOT '$2==categ {sum+=$3; sumsq+=$3*$3} END {var=(sumsq-(sum*sum)/boot)/(boot-1); sd=sqrt(var); printf ("%.3f\n", sd)}' $pool)
+  MISTOL_V=0
+  MISTOL_D=$(awk -v categ="tolerated" -v boot=$N_BOOT '$2==categ {sum+=$3; sumsq+=$3*$3} END {var=(sumsq-(sum*sum)/boot)/(boot-1); sd=sqrt(var); printf ("%.3f\n", sd)}' $pool)
+  MISDEL_V=0
+  MISDEL_D=$(awk -v categ="deleterious" -v boot=$N_BOOT '$2==categ {sum+=$3; sumsq+=$3*$3} END {var=(sumsq-(sum*sum)/boot)/(boot-1); sd=sqrt(var); printf ("%.3f\n", sd)}' $pool)
+  LOF_V=0
+  LOF_D=$(awk -v categ="LoF" -v boot=$N_BOOT '$2==categ {sum+=$3; sumsq+=$3*$3} END {var=(sumsq-(sum*sum)/boot)/(boot-1); sd=sqrt(var); printf ("%.3f\n", sd)}' $pool)
+  echo -e "$SAMPLE\t$GEN\t$NONFOURFOLD_V\t$NONFOURFOLD_D\t$FOURFOLD_V\t$FOURFOLD_D\t$MISTOL_V\t$MISTOL_D\t$MISDEL_V\t$MISDEL_D\t$LOF_V\t$LOF_D" >> rarefied_depth_${DEPTH}_counts_pool_gen0-140_${REGION}_std_dev.perpop_V_sites.txt
+  done
+
+#From the local environment:
+REGION="autosomes" #all #autosomes #Xchr
+DEPTH=50
+scp ramon.pouso@rua2.uvigo.es://share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/depth${DEPTH}/rarefied_depth_${DEPTH}_counts_pool_gen0-140_${REGION}_std_dev.perpop_V_sites.txt /Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/all_sites/rarefied/depth${DEPTH}/
 
 ```
 
@@ -7997,11 +8139,14 @@ if (parameters=="L0.04.L_lethal0.015.K1000.beta0.33.s0.2.h0.283.Neutral") {
 }
 }
 
+#Edit the facet labels for the neutral model:
+new_category_names <- c("previously m. deleterious","previously LoF")
+names(new_category_names) <- c("m. deleterious","LoF")
 
 #Plot the data (all models combined):
 Pb_lines_relativised_pool_counts_copies_errors_4FR_ggplot_neutral_withnewmut <- ggplot(data=filter(average_combined_tidy_neutral_withnewmut,ratio!="fourfold",ratio!="m. tolerated"), aes(generation,mean)) +
   #facet_wrap(feature ~ species,nrow=6,ncol=2,scales="free") +
-  facet_grid(. ~ ratio) +
+  facet_grid(. ~ ratio, labeller = labeller(ratio = new_category_names)) +
   geom_errorbar(aes(ymin=mean-error, ymax=mean+error, group=population), position=position_dodge(10),linewidth=0.5,width=0.5) +
   geom_point(aes(colour=population,shape=population),size=3,position=position_dodge(10)) + 
   #ggtitle("Proportion of reads at different NM") +
@@ -8131,9 +8276,16 @@ library(grid)
 library(gridExtra)
 library(egg)
 
+#Version without editing names for the neutral model:
 ggplot_combined <- grid.arrange(set_panel_size(Pb_lines_relativised_pool_counts_copies_errors_4FR_ggplot_neutral_withnewmut,width=unit(6,"cm"),height=unit(6,"cm")),set_panel_size(Pb_lines_relativised_pool_counts_copies_errors_4FR_ggplot_additive_withnewmut,width=unit(6,"cm"),height=unit(6,"cm")),set_panel_size(Pb_lines_relativised_pool_counts_copies_errors_4FR_ggplot_purging_withnewmut,width=unit(6,"cm"),height=unit(6,"cm")),ncol=1,bottom=textGrob(expression(bold("Generations")),gp=gpar(fontsize=11,fontface="bold"),x=0.38,hjust=0),left=textGrob(expression(bold("Derived count relative to Pb-083 and 4-fold syn.")), rot=90,gp=gpar(fontsize=11,fontface="bold"),vjust=2),right=textGrob(expression(bold("Neutral model                                         Additive model                                      Purging model")),rot=-90,gp=gpar(fontsize=11,fontface="bold"),x=-5,vjust=0,hjust=0.51))
 
 ggsave("20240315_main_simulations.ratio_of_averages.syn_wout.pdf", width=18, height=22.5, units="cm", device="pdf", path="/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/simulations/excl_newmut_gen83/",ggplot_combined)
+
+
+#Version editing names for the neutral model:
+ggplot_combined <- grid.arrange(set_panel_size(Pb_lines_relativised_pool_counts_copies_errors_4FR_ggplot_neutral_withnewmut,width=unit(6,"cm"),height=unit(6,"cm")),set_panel_size(Pb_lines_relativised_pool_counts_copies_errors_4FR_ggplot_additive_withnewmut,width=unit(6,"cm"),height=unit(6,"cm")),set_panel_size(Pb_lines_relativised_pool_counts_copies_errors_4FR_ggplot_purging_withnewmut,width=unit(6,"cm"),height=unit(6,"cm")),ncol=1,bottom=textGrob(expression(bold("Generations")),gp=gpar(fontsize=11,fontface="bold"),x=0.38,hjust=0),left=textGrob(expression(bold("Derived count relative to Pb-083 and 4-fold syn.")), rot=90,gp=gpar(fontsize=11,fontface="bold"),vjust=2),right=textGrob(expression(bold("Post-founding neutral model                          Additive model                                      Purging model")),rot=-90,gp=gpar(fontsize=11,fontface="bold"),x=-5,vjust=0,hjust=0.56))
+
+ggsave("20260407_suppl_simulations.ratio_of_averages.pdf", width=18, height=22.5, units="cm", device="pdf", path="/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/simulations/excl_newmut_gen83/",ggplot_combined)
 
 #Stop
 STOP
@@ -11662,7 +11814,7 @@ for BLOCK in ${BLOCKLIST[@]}
 
 ```
 
-####Rarefied:
+####Rarefied (WRONG because each block uses different sites; but these errors aren't used in the end):
 ```{r, eval=FALSE, engine='bash'}
 
 #Run it as follows:
@@ -11689,7 +11841,7 @@ echo "generating parallel derived allele counts for chunk" $CHUNK
 echo "retrieving blocks in chunk" $CHUNK
 BLOCKLIST=$(cut -d'.' -f1 derived_allele_counts/$REGION/block_list/block_list_${CHUNK}.txt)
 echo "retrieving pools"
-POOL_LIST=($(ls -v `find "/share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/depth$DEPTH" -name '*_gen0-140_pool.'$REGION'.perpop_V_sites.rarefaction_average.txt' -print`))
+POOL_LIST=($(ls -v `find "/share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/depth$DEPTH" -name '*_gen0-140_pool.'$REGION'.perpop_V_sites.rarefaction_average.txt' -print`)) #this are the files that are wrong; these averages are calculated as if all iterations contained the same sites
 for BLOCK in ${BLOCKLIST[@]}
   do 
   echo "working with block" ${BLOCK}
@@ -12267,6 +12419,31 @@ cat pool_headers.tris.txt <(paste rarefied_depth${DEPTH}_pop_codes.txt <(cat <(g
 
 ```
 
+######Grouping synonymous, but also keeping fourfold:
+```{bash}
+
+DEPTH=50
+REGION="autosomes" #autosomes #Xchr
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/bootstrap/derived_allele_counts/$REGION/block_counts/
+
+#First, generate some headers and info files (this should only be performed once):
+echo -e "sample\tgeneration\tsynonymous_V\tsynonymous_D\tfourfold_V\tfourfold_D\ttolerated_V\ttolerated_D\tdeleterious_V\tdeleterious_D\tLoF_V\tLoF_D" > pool_headers.tris.txt #Retrieve headers for files with pools
+#head -n1 <$(ls rarefied_depth${DEPTH}_counts_pool_gen0-140_${REGION}_summary.bl*.txt | head -n1) > rarefied_depth${DEPTH}_pool_headers.txt #Retrieve headers for files with pools
+printf 'Pb\n%.0s' {1..5} > rarefied_depth${DEPTH}_pop_codes.txt #then generate the population column content
+printf 'lines\n%.0s' {1..2} >> rarefied_depth${DEPTH}_pop_codes.txt
+tail -n+2 <$(ls rarefied_depth${DEPTH}_counts_pool_gen0-140_${REGION}_summary.bl*.txt | head -n1) | cut -f-2 > rarefied_depth${DEPTH}_pool_gen.txt #Retrieve first 2 columns with pool data
+
+#Next, obtain the population average and sampling error (standard error) for the empirical data.
+##Average:
+cat pool_headers.tris.txt <(paste rarefied_depth${DEPTH}_pop_codes.txt <(cat <(gawk '!($1~/sample/) {N[$2]++; for (i=3;i<=NF;i++) {sum[$2"."i] += $i};} END {for (p in N) {printf "%s\t", p; for (i=3;i<NF;i++) printf("%.3f\t",sum[p"."i]/N[p]); printf("%.3f\n",sum[p"."NF]/N[p]);}}' <(tail -n+2 /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/depth${DEPTH}/rarefied_depth_${DEPTH}_counts_pool_gen0-140_${REGION}_summary.perpop_V_sites.txt | awk '{printf("%s\t%s\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\n",$1,$2,$3+$5,$4+$6,$5,$6,$7,$8,$9,$10,$11,$12)}') | sort -t n -k2,2g) <(gawk '$1~/sample/ {N[$2]++; for (i=3;i<=NF;i++) {sum[$2"."i] += $i};} END {for (p in N) {printf "%s\t", p; for (i=3;i<NF;i++) printf("%.3f\t",sum[p"."i]/N[p]); printf("%.3f\n",sum[p"."NF]/N[p]);}}' <(tail -n+2 /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/depth${DEPTH}/rarefied_depth_${DEPTH}_counts_pool_gen0-140_${REGION}_summary.perpop_V_sites.txt | awk '{printf("%s\t%s\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\n",$1,$2,$3+$5,$4+$6,$5,$6,$7,$8,$9,$10,$11,$12)}')))) > /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/depth${DEPTH}/rarefied_depth_${DEPTH}_counts_pool_gen0-140_${REGION}_average.empirmean.perpop_V_sites.txt
+
+#tail -n+2 /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/depth${DEPTH}/rarefied_depth_${DEPTH}_counts_pool_gen0-140_${REGION}_average.empirmean.perpop_V_sites.txt | cut -f-2 > rarefied_depth${DEPTH}_pop_gen.txt
+
+##Standard error: sqrt(variance(N)/N); we'll be using the N-1 version of the variance formula.
+cat pool_headers.tris.txt <(paste rarefied_depth${DEPTH}_pop_codes.txt <(cat <(gawk '!($1~/sample/) {N[$2]++; for (i=3;i<=NF;i++) {sum[$2"."i] += $i};} END {for (p in N) {printf "%s\t", p; for (i=3;i<NF;i++) printf("%.3f\t",0); printf("%.3f\n",0);}}' <(tail -n+2 /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/depth${DEPTH}/rarefied_depth_${DEPTH}_counts_pool_gen0-140_${REGION}_summary.perpop_V_sites.txt | awk '{printf("%s\t%s\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\n",$1,$2,$3+$5,$4+$6,$5,$6,$7,$8,$9,$10,$11,$12)}') | sort -t n -k2,2g) <(gawk '$1~/sample/ {N[$2]++; for (i=3;i<=NF;i++) {sum[$2","i] += $i; sumsq[$2","i]+=$i*$i;}} END {for (p in N) {printf "%s\t", p; for (i=3;i<NF;i++) printf("%.3f\t",(((sumsq[p","i]-sum[p","i]*sum[p","i]/N[p])/(N[p]-1))/N[p])**0.5); printf("%.3f\n",(((sumsq[p","NF]-sum[p","NF]*sum[p","NF]/N[p])/(N[p]-1))/N[p])**0.5); }}' <(tail -n+2 /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/depth${DEPTH}/rarefied_depth_${DEPTH}_counts_pool_gen0-140_${REGION}_summary.perpop_V_sites.txt | awk '{printf("%s\t%s\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\n",$1,$2,$3+$5,$4+$6,$5,$6,$7,$8,$9,$10,$11,$12)}')))) > /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/depth${DEPTH}/rarefied_depth_${DEPTH}_counts_pool_gen0-140_${REGION}_average.empirerror.perpop_V_sites.txt
+
+```
+
 
 #####Synthetic genomes counts:
 ######Autosomes/Xchr:
@@ -12364,6 +12541,81 @@ for boot in $(seq 1 $N_BOOT) #100 (4mins) #1000
     sed -e "s/^/rarefied_depth${DEPTH}_counts_pool_gen0-140_autosomes_summary./" /share/rdata/ramon.pouso/POOLS/all_gens_0_140/bootstrap/bootstrapped_genomes_coordinates/bootstrapped_genome_autosomes_${boot}.list > rarefied_depth${DEPTH}_bootstrapped_genome_autosomes_${boot}.list
     ##Next, generate the counts for each bootstrapped genome:
     paste rarefied_depth${DEPTH}_pool_gen.txt <(awk '{for (i=3;i<=NF;i++) total[FNR","i]+=$i;} END{for (j=1;j<=FNR;j++) {for (i=3;i<=NF;i++) printf "%.3f\t",total[j","i]; print "";}}' $(cat rarefied_depth${DEPTH}_bootstrapped_genome_autosomes_${boot}.list) | tail -n+2 | awk '{printf("%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\n",$1+$3,$2+$4,$5,$6,$7,$8,$9,$10)}') > rarefied_depth${DEPTH}_counts_pool_gen0-140_autosomes_summary.boot_${boot}.txt
+    echo "calculating population averages for bootstrapped genome number" $boot
+    cat <(gawk '!($1~/sample/) {N[$2]++; for (i=3;i<=NF;i++) {sum[$2"."i] += $i};} END {for (p in N) {printf "%s\t", p; for (i=3;i<NF;i++) printf("%.9f\t",sum[p"."i]/N[p]); printf("%.9f\n",sum[p"."NF]/N[p]);}}' rarefied_depth${DEPTH}_counts_pool_gen0-140_autosomes_summary.boot_${boot}.txt | sort -t n -k2,2g) <(gawk '$1~/sample/ {N[$2]++; for (i=3;i<=NF;i++) {sum[$2"."i] += $i};} END {for (p in N) {printf "%s\t", p; for (i=3;i<NF;i++) printf("%.9f\t",sum[p"."i]/N[p]); printf("%.9f\n",sum[p"."NF]/N[p]);}}' rarefied_depth${DEPTH}_counts_pool_gen0-140_autosomes_summary.boot_${boot}.txt) > rarefied_depth${DEPTH}_counts_pool_gen0-140_autosomes_average.boot_${boot}.txt
+    else
+    echo "error"
+  fi
+  done
+
+if [ $REGION == "whole-genome" ]
+  then
+  cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/bootstrap/derived_allele_counts/$REGION
+  else
+  cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/bootstrap/derived_allele_counts/$REGION/block_counts/
+fi
+#Next, obtain the population average of derived counts across bootstrapped genomes, but first store the correct files for the current $BOOT_N in an input list, so that only those (and not those from other bootstraps) are called:
+ls -v rarefied_depth${DEPTH}_counts_pool_gen0-140_${REGION}_average.boot_*[[:digit:]]*.txt | awk -v nboot="$N_BOOT" -F"_|\\\\." '$9 <= nboot {print $0}' > rarefied_depth${DEPTH}_counts_pool_gen0-140_${REGION}_average.Nboot_${N_BOOT}.list
+
+cat pool_headers.tris.txt <(paste rarefied_depth${DEPTH}_pop_gen.txt <(awk -v nboot="$N_BOOT" '{for (i=2;i<=NF;i++) total[FNR","i]+=$i;} END{for (j=1;j<=FNR;j++) {for (i=2;i<=NF;i++) printf "%.9f\t ",total[j","i]/nboot; print "";}}' $(<rarefied_depth${DEPTH}_counts_pool_gen0-140_${REGION}_average.Nboot_${N_BOOT}.list))) > rarefied_depth${DEPTH}_counts_pool_gen0-140_${REGION}_average.bootmean.txt
+
+#Test average:
+N_BOOT=1000
+TOTAL=0
+touch kaka.txt
+LIST=$(cat rarefied_depth${DEPTH}_counts_pool_gen0-140_${REGION}_average.Nboot_${N_BOOT}.list)
+for BLOCK in ${LIST[@]}
+  do
+  echo $BLOCK
+  CURRENT=$(head -n1 $BLOCK | cut -f2 | cut -d'.' -f1)
+  echo $CURRENT >> kaka.txt
+  TOTAL=$((TOTAL+CURRENT))
+  done
+echo $TOTAL #divide this by NBOOT
+
+
+#sed 's/ 0.0/ 1.1/g' OR sed 's/\t0.0/\t1.1/g'
+#^ use this to remove 0s
+
+#Next, obtain the bootstrap error of derived counts across bootstrapped genomes. The bootstrap error is the standard deviation of the N bootstraps, so it can be obtained as the sqrt(var(N)). We'll be using the N-1 version of the variance formula:
+cat pool_headers.tris.txt <(paste rarefied_depth${DEPTH}_pop_gen.txt <(awk -v nboot="$N_BOOT" '{for (i=2;i<=NF;i++) {total[FNR","i]+=$i; sumsq[FNR","i]+=$i*$i; }} END{for (j=1;j<=FNR;j++) {for (i=2;i<=NF;i++) printf "%.9f\t",((sumsq[j","i]-total[j","i]*total[j","i]/nboot)/(nboot-1))**0.5; print "";}}' $(<rarefied_depth${DEPTH}_counts_pool_gen0-140_${REGION}_average.Nboot_${N_BOOT}.list))) > rarefied_depth${DEPTH}_counts_pool_gen0-140_${REGION}_average.booterror.txt
+
+
+#Since averages are different between the empirical data and the bootstrap, we need to correct the errors. 
+##As a first step, the empirical means should be divided by the bootstrap means to obtain the correction factor for the bootstrap errors:
+cat pool_headers.tris.txt <(paste <(tail -n+2 /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/depth${DEPTH}/rarefied_depth_${DEPTH}_counts_pool_gen0-140_${REGION}_average.empirmean.perpop_V_sites.txt) <(tail -n+2 rarefied_depth${DEPTH}_counts_pool_gen0-140_${REGION}_average.bootmean.txt) | awk '{h=NF/2;for (i=3;i<=h;i++) $i=$i/$(i+h);NF=h};1' | tr " " "\t") > rarefied_depth${DEPTH}_counts_pool_gen0-140_${REGION}_average.bootcorrectionfactor.txt
+##Then the errors can be multiplied by the correction factors in order to obtain the expected errors for the empirical means:
+cat pool_headers.tris.txt <(paste <(tail -n+2 rarefied_depth${DEPTH}_counts_pool_gen0-140_${REGION}_average.bootcorrectionfactor.txt) <(tail -n+2 rarefied_depth${DEPTH}_counts_pool_gen0-140_${REGION}_average.booterror.txt) | awk '{h=NF/2;for (i=3;i<=h;i++) $i=$i*$(i+h);NF=h};1' | tr " " "\t") > rarefied_depth${DEPTH}_counts_pool_gen0-140_${REGION}_average.booterrorcorrected.txt
+
+
+#Per population total error: Eglobal(M) = [EB^2(M) + ET^2(M)]^0.5 where EB is the per population mean of the (corrected) bootstrap error, and ET is the per population empirical standard error (sampling error, which is 0 for the base population).
+cat pool_headers.tris.txt <(paste rarefied_depth${DEPTH}_pop_gen.txt <(awk '{for (i=3;i<=NF;i++) {total[FNR","i]+=$i; sumsq[FNR","i]+=$i*$i; }} END {for (j=1;j<=FNR;j++) {for (i=3;i<NF;i++) printf "%.9f\t",(sumsq[j","i])**0.5; printf "%.9f\n",(sumsq[j","NF])**0.5;}}' <(tail -n+2 rarefied_depth${DEPTH}_counts_pool_gen0-140_${REGION}_average.booterrorcorrected.txt) <(tail -n+2 /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/depth${DEPTH}/rarefied_depth_${DEPTH}_counts_pool_gen0-140_${REGION}_average.empirerror.perpop_V_sites.txt))) > rarefied_depth${DEPTH}_counts_pool_gen0-140_${REGION}_average.totalerror.txt
+
+#Per population adequate or mixed error: booterrorcorrected for the PB (actually, it would be the total error, but the empirical here is 0 since only one population is considered, which means that booterrorcorrected is the total error), and empirerror for the lines (because repetition already accounts for the evolutionary error, thus the bootstrap is redundant).
+cat pool_headers.tris.txt <(tail -n+2 rarefied_depth${DEPTH}_counts_pool_gen0-140_${REGION}_average.booterrorcorrected.txt | awk '$1=="Pb"') <(tail -n+2 /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/depth${DEPTH}/rarefied_depth_${DEPTH}_counts_pool_gen0-140_${REGION}_average.empirerror.perpop_V_sites.txt | awk '$1=="lines"') > rarefied_depth${DEPTH}_counts_pool_gen0-140_${REGION}_average.adequateerror.txt
+
+```
+
+######Grouping synonymous, but also keeping fourfold:
+```{bash}
+
+DEPTH=50
+REGION="autosomes" #autosomes #Xchr #whole-genome
+N_BOOT=1000 #100 #1000
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/bootstrap/derived_allele_counts/
+
+#Next, generate several bootstrapped w-g counts by adding the counts of 1090 autosomal and 235 Xchr blocks pulled at random from the pool, and obtain the population averages:
+for boot in $(seq 1 $N_BOOT) #100 (4mins) #1000
+  do
+  #Autosomes:
+  if [ $REGION == "autosomes" ]
+    then
+    cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/bootstrap/derived_allele_counts/autosomes/block_counts/
+    ##First, edit the filenames of the input blocks so that they match the current variables:
+    echo "generating autosomal counts for bootstrapped genome number" $boot
+    sed -e "s/^/rarefied_depth${DEPTH}_counts_pool_gen0-140_autosomes_summary./" /share/rdata/ramon.pouso/POOLS/all_gens_0_140/bootstrap/bootstrapped_genomes_coordinates/bootstrapped_genome_autosomes_${boot}.list > rarefied_depth${DEPTH}_bootstrapped_genome_autosomes_${boot}.list
+    ##Next, generate the counts for each bootstrapped genome:
+    paste rarefied_depth${DEPTH}_pool_gen.txt <(awk '{for (i=3;i<=NF;i++) total[FNR","i]+=$i;} END{for (j=1;j<=FNR;j++) {for (i=3;i<=NF;i++) printf "%.3f\t",total[j","i]; print "";}}' $(cat rarefied_depth${DEPTH}_bootstrapped_genome_autosomes_${boot}.list) | tail -n+2 | awk '{printf("%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\n",$1+$3,$2+$4,$3,$4,$5,$6,$7,$8,$9,$10)}') > rarefied_depth${DEPTH}_counts_pool_gen0-140_autosomes_summary.boot_${boot}.txt
     echo "calculating population averages for bootstrapped genome number" $boot
     cat <(gawk '!($1~/sample/) {N[$2]++; for (i=3;i<=NF;i++) {sum[$2"."i] += $i};} END {for (p in N) {printf "%s\t", p; for (i=3;i<NF;i++) printf("%.9f\t",sum[p"."i]/N[p]); printf("%.9f\n",sum[p"."NF]/N[p]);}}' rarefied_depth${DEPTH}_counts_pool_gen0-140_autosomes_summary.boot_${boot}.txt | sort -t n -k2,2g) <(gawk '$1~/sample/ {N[$2]++; for (i=3;i<=NF;i++) {sum[$2"."i] += $i};} END {for (p in N) {printf "%s\t", p; for (i=3;i<NF;i++) printf("%.9f\t",sum[p"."i]/N[p]); printf("%.9f\n",sum[p"."NF]/N[p]);}}' rarefied_depth${DEPTH}_counts_pool_gen0-140_autosomes_summary.boot_${boot}.txt) > rarefied_depth${DEPTH}_counts_pool_gen0-140_autosomes_average.boot_${boot}.txt
     else
@@ -13150,7 +13402,10 @@ export SSHPASS=$(cat /Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/dro
 #Empirical mean:
 sshpass -e scp ramon.pouso@rua2.uvigo.es://share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/depth${DEPTH}/rarefied_depth_${DEPTH}_counts_pool_gen0-140_${REGION}_average.empirmean.perpop_V_sites.txt /Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/bootstrap/all_sites
 
-#Adequate error :
+#Empirical error:
+sshpass -e scp ramon.pouso@rua2.uvigo.es://share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/depth${DEPTH}/rarefied_depth_${DEPTH}_counts_pool_gen0-140_${REGION}_average.empirerror.perpop_V_sites.txt /Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/bootstrap/all_sites
+
+#Adequate error:
 sshpass -e scp ramon.pouso@rua2.uvigo.es://share/rdata/ramon.pouso/POOLS/all_gens_0_140/bootstrap/derived_allele_counts/$REGION/block_counts/rarefied_depth${DEPTH}_counts_pool_gen0-140_${REGION}_average.adequateerror.txt /Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/bootstrap/all_sites
 
 ```
@@ -13383,7 +13638,7 @@ ggsave(paste0("Pb_lines_pool_counts_copies_adequateerrors_",type,".bootstrap.y_s
 
 ```
 
-####Rarefied:
+####!Rarefied:
 ```{r}
 
 library(readr)
@@ -13398,7 +13653,8 @@ type <- "autosomes" #all #autosomes #Xchr
 wd_path <- ("/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/bootstrap/all_sites/")
 #codes_dictionary <- read_tsv(paste0(wd_path,"pop_codes_dictionary.txt"),col_names=c("old","population"))
 
-pool_counts <- read_tsv(paste0(wd_path,"rarefied_depth_",depth,"_counts_pool_gen0-140_",type,"_average.empirmean.perpop_V_sites.txt")) %>% select(.,sample,generation,contains("_D")) %>% rename_at(vars("sample"),funs(gsub("sample","population",.))) %>% filter(generation!="gen5")
+#pool_counts <- read_tsv(paste0(wd_path,"rarefied_depth_",depth,"_counts_pool_gen0-140_",type,"_average.empirmean.perpop_V_sites.txt")) %>% select(.,sample,generation,contains("_D")) %>% rename_at(vars("sample"),funs(gsub("sample","population",.))) %>% filter(generation!="gen5")
+pool_counts <- read_tsv(paste0(wd_path,"HYBRID_METHOD_rarefied_depth_",depth,"_counts_pool_gen0-140_",type,"_average.empirmean.perpop_V_sites.txt")) %>% select(.,sample,generation,contains("_D")) %>% rename_at(vars("sample"),funs(gsub("sample","population",.))) %>% filter(generation!="gen5") #hybrid method (Pb is rarefied taking different sites for each pool and iteration; each line is rarefied taking the same sites for both pools, but different between iterations. This file is combined MANUALLY, using the OLD version of empirmean for lines, and the latest one for Pb)!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 #pool_counts <- left_join(pool_counts,codes_dictionary,by=c("sample"="old"))
 pool_counts$population = factor(pool_counts$population,levels=c("Pb","lines"))
 pool_counts$generation <- as.numeric(gsub("gen","",pool_counts$generation)) + 83
@@ -13411,7 +13667,8 @@ pool_counts <- pool_counts %>% setNames(gsub("_D","",names(.)))
 # pool_counts_4FR
 pool_counts_tidy <- pool_counts %>% gather(ratio,value,-generation,-population,factor_key=T)
 
-pool_errors <- read_tsv(paste0(wd_path,"rarefied_depth",depth,"_counts_pool_gen0-140_",type,"_average.adequateerror.txt")) %>% select(.,sample,generation,contains("_D")) %>% rename_at(vars("sample"),funs(gsub("sample","population",.))) %>% filter(generation!="gen5")
+#pool_errors <- read_tsv(paste0(wd_path,"rarefied_depth",depth,"_counts_pool_gen0-140_",type,"_average.adequateerror.txt")) %>% select(.,sample,generation,contains("_D")) %>% rename_at(vars("sample"),funs(gsub("sample","population",.))) %>% filter(generation!="gen5")
+pool_errors <- read_tsv(paste0(wd_path,"rarefied_depth_",depth,"_counts_pool_gen0-140_",type,"_average.empirerror.perpop_V_sites.txt")) %>% select(.,sample,generation,contains("_D")) %>% rename_at(vars("sample"),funs(gsub("sample","population",.))) %>% filter(generation!="gen5")
 #pool_errors <- cbind(pool_errors,pool_counts$fourfold_D)
 #names(pool_errors)[names(pool_errors) == 'pool_counts$fourfold_D'] <- 'counts_fourfold_D'
 #pool_errors <- left_join(pool_errors,codes_dictionary,by=c("population"="old"))
@@ -13445,7 +13702,7 @@ combined_tidy_withnewmut <- left_join(combined_tidy_withnewmut,combined_tidy_y_a
 ##Two colours (manuscript version, only including new mutation):
 combined_tidy_withnewmut_bis <- combined_tidy_withnewmut
 combined_tidy_withnewmut_bis$generation <- as.numeric(as.character(combined_tidy_withnewmut_bis$generation))
-combined_tidy_withnewmut_bis$ratio <- factor(combined_tidy_withnewmut_bis$ratio, levels = c("synonymous", "tolerated", "deleterious", "LoF"), labels = c("synonymous", "m. tolerated", "m. deleterious", "LoF"))
+combined_tidy_withnewmut_bis$ratio <- factor(combined_tidy_withnewmut_bis$ratio, levels = c("synonymous", "fourfold", "tolerated", "deleterious", "LoF"), labels = c("syn.", "syn. fourfold", "m. tolerated", "m. deleterious", "LoF"))
 
 #Separate version:
 Pb_lines_withnewmut_pool_counts_copies_errors <- ggplot(data=combined_tidy_withnewmut_bis, aes(generation,mean)) +
@@ -13490,17 +13747,17 @@ Pb_lines_withnewmut_pool_counts_copies_errors <- ggplot(data=combined_tidy_withn
         legend.title=element_blank()
   )
 Pb_lines_withnewmut_pool_counts_copies_errors
-ggsave("rarefied_depth50_absolute_counts.pdf", width=15, height=12, units="cm", device="pdf", path="/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/bootstrap/")
+#ggsave("rarefied_depth50_absolute_counts.pdf", width=15, height=12, units="cm", device="pdf", path="/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/bootstrap/")
 
 library(grid)
 library(gridExtra)
 library(egg)
 
-ggplot_combined <- grid.arrange(set_panel_size(Pb_lines_withnewmut_pool_counts_copies_errors,width=unit(3.5,"cm"),height=unit(6,"cm")),bottom=textGrob(expression(bold("Generations")),gp=gpar(fontsize=10,fontface="bold"),x=0.33,hjust=-1),left=textGrob(expression(bold("Depth 50 rarefied derived count (incl. new mut.)")),rot=90,gp=gpar(fontsize=10,fontface="bold"),vjust=1))
+ggplot_combined <- grid.arrange(set_panel_size(Pb_lines_withnewmut_pool_counts_copies_errors,width=unit(3.5,"cm"),height=unit(6,"cm")),bottom=textGrob(expression(bold("Generations")),gp=gpar(fontsize=10,fontface="bold"),x=0.33,hjust=-1),left=textGrob(expression(bold("Depth 50 rarefied derived count")),rot=90,gp=gpar(fontsize=10,fontface="bold"),vjust=1))
 
 #ggplot_combined <- grid.arrange(set_panel_size(Pb_lines_withnewmut_relativised_pool_counts_copies_errors_4FR_ggplot_bis_syn_wout,width=unit(6,"cm"),height=unit(6,"cm")),bottom=textGrob(expression(bold("Generations")),gp=gpar(fontsize=11,fontface="bold"),x=0.45,vjust=-1),left=textGrob(expression(bold("Derived count relative to Pb-083 and 4-fold syn.")),rot=90,gp=gpar(fontsize=11,fontface="bold"),vjust=1))
 
-ggsave("20250428_absolute_rarefied_depth50.pdf", width=22, height=8.5, units="cm", device="pdf", path="/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/bootstrap/",ggplot_combined)
+ggsave("20260414_absolute_rarefied_depth50.hybrid.pdf", width=27, height=8.5, units="cm", device="pdf", path="/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/bootstrap/",ggplot_combined)
 
 
 #Combined with the version without new mutation (obtained in the bootstrap.Rmd script):
@@ -13560,7 +13817,7 @@ ggsave("20250430_absolute_rarefied_depth50.combined.pdf", width=22, height=14.7,
 ###Derived count ratios (relative to 4fold and Pb-000):
 ####Gen0-140 pools Pb booterror and line averages empirerror (combined version):
 #####All sites:
-######Double ratio:
+######!Double ratio:
 ```{r}
 
 library(readr)
@@ -16215,7 +16472,494 @@ ggsave(paste0("non-validated_snps_AF.pdf"), width=15, height=10, units="cm", dev
 
 ```
 
-###Check derived counts after removing unvalidated sites.
+###Check validated derived counts; cross validation at the main VCF level (same N SNPs per sample):
+####Retrieve validated subset:
+```{R, engine='bash'}
+
+module load gcc/7.2.0 
+module add gcc/7.2.0
+
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants
+bedtools subtract -a /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.polarized.nr_annovar.dm6nr_multianno.custom_complete.vcf -b /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.polarized.nr_annovar.dm6nr_multianno.custom_complete.non_validated_snps.bed -header > /share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.polarized.nr_annovar.dm6nr_multianno.custom_complete.validated_subset.vcf
+
+```
+
+####Split VCF by pool; include AF=0:
+```{R, engine='bash'}
+
+mkdir -p /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/
+
+module load bcftools/1.9
+
+VCF="/share/rdata/ramon.pouso/POOLS/all_gens_0_140/variants/crisp_all_pools_gen0-140_masked.recode_snps.gen0-140_all_sites.orthologs.confident.DP_EM_filtered.polarisable.polarized.nr_annovar.dm6nr_multianno.custom_complete.validated_subset.vcf"
+POOLS=$(bcftools query -l "${VCF}")
+for p in ${POOLS[@]}
+  do
+  echo "${p}"
+  #ID=$(echo "${p}")
+  #POOL_NAME=$(echo "${p}")
+  SAMPLE=$(echo "${p}" | cut -d'_' -f1 | sort | uniq)
+  FIELD_NUMBER=$(grep "^#" $VCF | grep -v '##' | tr "\t" "\n" | grep -nw $p | cut -d':' -f1)
+  if [[ "$SAMPLE" == "sample"* ]]
+    then
+    GEN=$(echo "${p}" | tr "_" "\n" | grep "gen")
+    paste <(grep -v '^#' $VCF | awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5,$6,$7,$8)}') <(grep -v '^#' $VCF | cut -f$FIELD_NUMBER | awk -F":|," '{printf ("%s\t%s\n", $4+$6+$8,$5+$7+$9)}') > "${SAMPLE}"_"${GEN}"_gen0-140_pool.validated_subset_all.txt
+    else
+    paste <(grep -v '^#' $VCF | awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2-1,$2,$3,$4,$5,$6,$7,$8)}') <(grep -v '^#' $VCF | cut -f$FIELD_NUMBER | awk -F":|," '{printf ("%s\t%s\n", $4+$6+$8,$5+$7+$9)}') > "${SAMPLE}"_gen0-140_pool.validated_subset_all.txt
+  fi
+  done
+
+mv LBT0_gen0-140_pool.validated_subset_all.txt LBT0_gen0_gen0-140_pool.validated_subset_all.txt
+mv c1_gen0-140_pool.validated_subset_all.txt c1_gen5_gen0-140_pool.validated_subset_all.txt
+mv BT20_gen0-140_pool.validated_subset_all.txt BT20_gen20_gen0-140_pool.validated_subset_all.txt
+mv BT30_gen0-140_pool.validated_subset_all.txt BT30_gen30_gen0-140_pool.validated_subset_all.txt
+mv c2_gen0-140_pool.validated_subset_all.txt c2_gen40_gen0-140_pool.validated_subset_all.txt
+mv C1_gen0-140_pool.validated_subset_all.txt C1_gen140_gen0-140_pool.validated_subset_all.txt
+
+```
+
+####Rarefied sites:
+#####Generate depth table for all sites:
+```{R, engine='bash'}
+
+#After observing the depth distribution of all samples, we've decided to leave out 3 lines (1, 10, and 17) due to their lower depth. Pb-005 is also out from the analysis.
+module load gcc/7.2.0
+module add gcc/7.2.0
+
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/
+
+#Create dataframe with the info from each site in the VCF:
+echo -e "CHR\tSTART\tEND\tID\tANCESTRAL\tDERIVED\tQUAL\tFILTER\tINFO" > all_samples_gen0-140_pool.validated_subset_all.depth_table.txt
+cut -f-9 LBT0_gen0_gen0-140_pool.validated_subset_all.txt >> all_samples_gen0-140_pool.validated_subset_all.depth_table.txt
+
+#Extract counts from each pool.
+POOLS=$(ls *gen0-140_pool.validated_subset_all.txt | grep -Ev 'c1_gen5_|sample1_|sample10_|sample17_')
+for p in ${POOLS[@]}
+  do
+  echo "${p}"
+  SAMPLE=$(echo $p | cut -d'_' -f-2)
+  paste all_samples_gen0-140_pool.validated_subset_all.depth_table.txt <(cat <(echo $SAMPLE) <(awk -F"\t" '{printf ("%s\n", $10+$11)}' "${p}")) > all_samples_gen0-140_pool.validated_subset_all.depth_table.temp.txt && mv all_samples_gen0-140_pool.validated_subset_all.depth_table.temp.txt all_samples_gen0-140_pool.validated_subset_all.depth_table.txt #201234
+  done
+
+```
+
+#####For all validated sites.
+######Extract state from all reads:
+#######extract_state_reads.validated_sites_all.sh
+```{R, engine='bash'}
+
+DEPTH=$1
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/
+POOL=$(ls *gen0-140_pool.validated_subset_all.txt | head -n$SGE_TASK_ID | tail -n1)
+
+rm ${POOL/.txt/_mod.txt}
+while read -r CHR START STOP ID ANC_STATE DER_STATE QUALITY TAG INFO ANC_COUNT DER_COUNT
+  do
+  TOT_COUNT=$((ANC_COUNT + DER_COUNT))
+  READS=$(echo "$(for i in $(seq 1 $ANC_COUNT); do printf "$ANC_STATE" ; done)""$(for i in $(seq 1 $DER_COUNT); do printf "$DER_STATE" ; done)")
+  echo -e "$CHR\t$START\t$STOP\t$ANC_STATE\t$DER_STATE\t$ANC_COUNT\t$DER_COUNT\t$TOT_COUNT\t$READS" >> ${POOL/.txt/_mod.txt}
+  done < $POOL
+
+#Save this code as: /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/extract_state_reads.validated_sites_all.sh
+
+```
+
+#######Send the array-jobs:
+```{R, engine='bash'}
+
+#Run it as follows:
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/
+
+POOL_N=$(ls *gen0-140_pool.validated_subset.txt | wc -l)
+qsub -cwd -l h=compute-0-9 -t 1-$POOL_N /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/extract_state_reads.validated_sites_all.sh
+
+```
+
+#####For V sites; V as the minimum available number across populations:
+######Find number V:
+```{R, engine='bash'}
+
+#First the global depth table must be obtained in the first chunk of section 13B. Also the extraction of the state of the reads must be obtained in the "For all sites" section.
+
+module load gcc/7.2.0
+module add gcc/7.2.0
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/
+
+REGION="autosomes" #all #autosomes #Xchr
+DEPTH=50
+
+#Count V (number of valid sites, that is, those with depth => $DEPTH) per pool and category:
+rm all_samples_gen0-140_pool.${REGION}.validated_subset.depth_table.perpop_mindepth_${DEPTH}.txt
+echo -e "population\tnon-fourfold\tfourfold\ttolerated\tdeleterious\tLoF" > all_samples_gen0-140_pool.${REGION}.validated_subset.depth_table.perpop_mindepth_${DEPTH}.txt
+
+#For lines:
+POP_LIST=$(head -n1 all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | cut -f10- | tr "\t" "\n" | cut -d'_' -f1 | grep "sample" | uniq)
+for pop in ${POP_LIST[@]}
+  do
+  echo "${pop}"
+  #SAMPLE=$(echo "${pool}" | cut -d'_' -f1)
+  #GEN=$(echo "${pool}" | cut -d'_' -f2)
+  COLS=$(head -n1 all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | cut -f10- | tr "\t" "\n" | grep -n "^$pop" | cut -d':' -f1 | awk '{for (i=1; i<=NF; i++) $i += 9} 1')
+  FIELDS=$(echo $COLS | tr " " "-")
+  if [ $REGION == "autosomes" ]
+    then
+    NONFOURFOLD_V=$(grep "CUSTOM=non-fourfold;" all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | grep -v "^X" | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth)' | wc -l)
+    FOURFOLD_V=$(grep "CUSTOM=fourfold;" all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | grep -v "^X" | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth)' | wc -l)
+    MISTOL_V=$(grep "CUSTOM=tolerated;" all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | grep -v "^X" | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth)' | wc -l)
+    MISDEL_V=$(grep "CUSTOM=deleterious;" all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | grep -v "^X" | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth)' | wc -l)
+    LOF_V=$(grep "CUSTOM=LoF;" all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | grep -v "^X" | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth)' | wc -l)
+  elif [ $REGION == "Xchr" ]
+    then
+    NONFOURFOLD_V=$(grep "CUSTOM=non-fourfold;" all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | grep "^X" | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth)' | wc -l)
+    FOURFOLD_V=$(grep "CUSTOM=fourfold;" all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | grep "^X" | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth)' | wc -l)
+    MISTOL_V=$(grep "CUSTOM=tolerated;" all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | grep "^X" | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth)' | wc -l)
+    MISDEL_V=$(grep "CUSTOM=deleterious;" all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | grep "^X" | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth)' | wc -l)
+    LOF_V=$(grep "CUSTOM=LoF;" all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | grep "^X" | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth)' | wc -l)
+  elif [ $REGION == "all" ]
+    then
+    NONFOURFOLD_V=$(grep "CUSTOM=non-fourfold;" all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth)' | wc -l)
+    FOURFOLD_V=$(grep "CUSTOM=fourfold;" all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth)' | wc -l)
+    MISTOL_V=$(grep "CUSTOM=tolerated;" all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth)' | wc -l)
+    MISDEL_V=$(grep "CUSTOM=deleterious;" all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth)' | wc -l)
+    LOF_V=$(grep "CUSTOM=LoF;" all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth)' | wc -l)
+  fi
+  echo -e "$pop\t$NONFOURFOLD_V\t$FOURFOLD_V\t$MISTOL_V\t$MISDEL_V\t$LOF_V" >> all_samples_gen0-140_pool.${REGION}.validated_subset.depth_table.perpop_mindepth_${DEPTH}.txt
+  done
+  
+#For Pb:
+COLS=$(head -n1 all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | cut -f10- | tr "\t" "\n" | cut -d'_' -f1 | grep -nv "sample" | cut -d':' -f1 | awk '{for (i=1; i<=NF; i++) $i += 9} 1')
+FIELDS=$(echo $COLS | cut -d' ' -f1,5 | tr " " "-")
+echo "Pb"
+if [ $REGION == "autosomes" ]
+  then
+  grep "CUSTOM=non-fourfold;" all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | grep -v "^X" | cut -f-9,$FIELDS | awk -v depth=$DEPTH '($10 >= depth) && ($11 >= depth) && ($12 >= depth) && ($13 >= depth) && ($14 >= depth)' | cut -f-3 | sort -k1,1 -k2,2n -u > Pb.autosomes.validated_subset.perpop_V_sites.ann_cat_non-fourfold.bed
+  NONFOURFOLD_V=$(wc -l < Pb.autosomes.validated_subset.perpop_V_sites.ann_cat_non-fourfold.bed)
+  grep "CUSTOM=fourfold;" all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | grep -v "^X" | cut -f-9,$FIELDS | awk -v depth=$DEPTH '($10 >= depth) && ($11 >= depth) && ($12 >= depth) && ($13 >= depth) && ($14 >= depth)' | cut -f-3 | sort -k1,1 -k2,2n -u > Pb.autosomes.validated_subset.perpop_V_sites.ann_cat_fourfold.bed
+  FOURFOLD_V=$(wc -l < Pb.autosomes.validated_subset.perpop_V_sites.ann_cat_fourfold.bed)
+  grep "CUSTOM=tolerated;" all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | grep -v "^X" | cut -f-9,$FIELDS | awk -v depth=$DEPTH '($10 >= depth) && ($11 >= depth) && ($12 >= depth) && ($13 >= depth) && ($14 >= depth)' | cut -f-3 | sort -k1,1 -k2,2n -u > Pb.autosomes.validated_subset.perpop_V_sites.ann_cat_tolerated.bed
+  MISTOL_V=$(wc -l < Pb.autosomes.validated_subset.perpop_V_sites.ann_cat_tolerated.bed)
+  grep "CUSTOM=deleterious;" all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | grep -v "^X" | cut -f-9,$FIELDS | awk -v depth=$DEPTH '($10 >= depth) && ($11 >= depth) && ($12 >= depth) && ($13 >= depth) && ($14 >= depth)' | cut -f-3 | sort -k1,1 -k2,2n -u > Pb.autosomes.validated_subset.perpop_V_sites.ann_cat_deleterious.bed
+  MISDEL_V=$(wc -l < Pb.autosomes.validated_subset.perpop_V_sites.ann_cat_deleterious.bed)
+  grep "CUSTOM=LoF;" all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | grep -v "^X" | cut -f-9,$FIELDS | awk -v depth=$DEPTH '($10 >= depth) && ($11 >= depth) && ($12 >= depth) && ($13 >= depth) && ($14 >= depth)' | cut -f-3 | sort -k1,1 -k2,2n -u > Pb.autosomes.validated_subset.perpop_V_sites.ann_cat_LoF.bed
+  LOF_V=$(wc -l < Pb.autosomes.validated_subset.perpop_V_sites.ann_cat_LoF.bed)
+elif [ $REGION == "Xchr" ]
+  then
+  NONFOURFOLD_V=$(grep "CUSTOM=non-fourfold;" all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | grep "^X" | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth) && ($3 >= depth) && ($4 >= depth) && ($5 >= depth)' | wc -l)
+  FOURFOLD_V=$(grep "CUSTOM=fourfold;" all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | grep "^X" | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth) && ($3 >= depth) && ($4 >= depth) && ($5 >= depth)' | wc -l)
+  MISTOL_V=$(grep "CUSTOM=tolerated;" all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | grep "^X" | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth) && ($3 >= depth) && ($4 >= depth) && ($5 >= depth)' | wc -l)
+  MISDEL_V=$(grep "CUSTOM=deleterious;" all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | grep "^X" | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth) && ($3 >= depth) && ($4 >= depth) && ($5 >= depth)' | wc -l)
+  LOF_V=$(grep "CUSTOM=LoF;" all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | grep "^X" | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth) && ($3 >= depth) && ($4 >= depth) && ($5 >= depth)' | wc -l)
+elif [ $REGION == "all" ]
+  then
+  NONFOURFOLD_V=$(grep "CUSTOM=non-fourfold;" all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth) && ($3 >= depth) && ($4 >= depth) && ($5 >= depth)' | wc -l)
+  FOURFOLD_V=$(grep "CUSTOM=fourfold;" all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth) && ($3 >= depth) && ($4 >= depth) && ($5 >= depth)' | wc -l)
+  MISTOL_V=$(grep "CUSTOM=tolerated;" all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth) && ($3 >= depth) && ($4 >= depth) && ($5 >= depth)' | wc -l)
+  MISDEL_V=$(grep "CUSTOM=deleterious;" all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth) && ($3 >= depth) && ($4 >= depth) && ($5 >= depth)' | wc -l)
+  LOF_V=$(grep "CUSTOM=LoF;" all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | cut -f$FIELDS | awk -v depth=$DEPTH '($1 >= depth) && ($2 >= depth) && ($3 >= depth) && ($4 >= depth) && ($5 >= depth)' | wc -l)
+fi
+echo -e "Pb\t$NONFOURFOLD_V\t$FOURFOLD_V\t$MISTOL_V\t$MISDEL_V\t$LOF_V" >> all_samples_gen0-140_pool.${REGION}.validated_subset.depth_table.perpop_mindepth_${DEPTH}.txt
+
+
+#Retrieve min V per category:
+rm all_samples_gen0-140_pool.${REGION}.min_V.validated_subset.perpop_mindepth_${DEPTH}.txt
+ANN_CATEGORIES=$(head -n1 all_samples_gen0-140_pool.${REGION}.validated_subset.depth_table.perpop_mindepth_${DEPTH}.txt | cut -f2- | tr "\t" "\n")
+for category in ${ANN_CATEGORIES[@]}
+  do
+  echo "${category}"
+  COL=$((1 + $(head -n1 all_samples_gen0-140_pool.${REGION}.validated_subset.depth_table.perpop_mindepth_${DEPTH}.txt | cut -f2- | tr "\t" "\n" | grep -n "^$category" | cut -d':' -f1)))
+  FIELDS=$(tail -n+2 all_samples_gen0-140_pool.${REGION}.validated_subset.depth_table.perpop_mindepth_${DEPTH}.txt | sort -k${COL},${COL}n | head -n1 | cut -f1,$COL)
+  echo -e "$category\t$FIELDS" >> all_samples_gen0-140_pool.${REGION}.min_V.validated_subset.perpop_mindepth_${DEPTH}.txt
+  done
+
+```
+
+######Generate rarefied counts:
+#######Lines:
+########rarefied_counts.perpop_V_sites.lines.validated_subset.sh
+```{R, engine='bash'}
+
+export PATH=$PATH:/share/apps/bedtools2/bin:/share/apps/est-sfs-release-2.03/:/share/apps/BAMTOOLS/bin:/share/apps/bedtools2/bin
+module load gcc/7.2.0
+module add gcc/7.2.0
+
+DEPTH=$1
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/
+POP=$(ls *gen0-140_pool.validated_subset_all.txt | grep "sample" | grep -Ev 'sample1_|sample10_|sample17_' | cut -d'_' -f1 | uniq | head -n$SGE_TASK_ID | tail -n1)
+echo $POP
+POOLS=$(ls *gen0-140_pool.validated_subset_all.txt | grep "^${POP}_")
+COLS=$(head -n1 all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | cut -f10- | tr "\t" "\n" | grep -n "^$POP" | cut -d':' -f1 | awk '{for (i=1; i<=NF; i++) $i += 9} 1')
+FIELDS=$(echo $COLS | tr " " "-")
+
+ANN_CATEGORIES=$(head -n1 all_samples_gen0-140_pool.autosomes.validated_subset.depth_table.perpop_mindepth_${DEPTH}.txt | cut -f2- | tr "\t" "\n")
+for boot in {1..100}
+  do
+  N_BOOT=$(printf "%03d" ${boot})
+  #echo $N_BOOT
+  for category in ${ANN_CATEGORIES[@]}
+    do
+    #echo "${category}"
+    V_CAT=$(awk -v categ=$category '$1==categ' all_samples_gen0-140_pool.autosomes.min_V.validated_subset.perpop_mindepth_${DEPTH}.txt | cut -f3)
+    grep "CUSTOM=$category;" all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | grep -v "^X" | cut -f-9,$FIELDS | awk -v depth=$DEPTH '($10 >= depth) && ($11 >= depth)' | sort -k1,1 -k2,2n -u | shuf -n$V_CAT | cut -f-3 > ${POP}.autosomes.validated_subset.perpop_V_sites.boot_${N_BOOT}.ann_cat_${category}.bed
+    for POOL in ${POOLS[@]}
+      do
+      sort -k1,1 -k2,2n -u ${POOL/.txt/_mod.txt} | bedtools intersect -a stdin -b ${POP}.autosomes.validated_subset.perpop_V_sites.boot_${N_BOOT}.ann_cat_${category}.bed | awk -v depth=$DEPTH -F"\t" 'BEGIN {"date +%N" | getline seed; srand(seed);} {if($8 >= depth) {printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t", $1,$2,$3,$4,$5,$6,$7,$8); len=length($9); for(i=1;i<=depth;) {k=int(rand()*len)+1; if(!(k in N)) {N[k]; printf "%s", substr($9,k,1); i++;}} split("", N); print ""} else {print}}' | awk -v categ=$category -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$6,$7,$8,$9,gsub($4, "", $9),gsub($5, "", $9),categ)}' > ./rarefied_counts/depth${DEPTH}/${POOL/.validated_subset_all.txt/.autosomes.validated_subset.perpop_V_sites.boot_${N_BOOT}.ann_cat_$category.txt}
+      done
+    rm ${POP}.autosomes.validated_subset.perpop_V_sites.boot_${N_BOOT}.ann_cat_${category}.bed
+    done
+  for POOL in ${POOLS[@]}
+    do
+    cat ./rarefied_counts/depth${DEPTH}/${POOL/.validated_subset_all.txt/.autosomes.validated_subset.perpop_V_sites.boot_${N_BOOT}.ann_cat*.txt} | sort -k1,1 -k2,2n -u > ./rarefied_counts/depth${DEPTH}/${POOL/.validated_subset_all.txt/.autosomes.validated_subset.perpop_V_sites.boot_${N_BOOT}.txt}
+    rm ./rarefied_counts/depth${DEPTH}/${POOL/.validated_subset_all.txt/.autosomes.validated_subset.perpop_V_sites.boot_${N_BOOT}.ann_cat*.txt}
+    done
+  done
+
+#Save this code as: /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/rarefied_counts.perpop_V_sites.lines.validated_subset.sh
+
+```
+
+########Send the array-jobs:
+```{R, engine='bash'}
+
+#Run it as follows:
+DEPTH=50 #Input the desired target depth
+mkdir -p /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/depth${DEPTH} 
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/
+
+POP_N=$(ls *gen0-140_pool.validated_subset_all.txt | grep "sample" | grep -Ev 'sample1_|sample10_|sample17_' | cut -d'_' -f1 | uniq | wc -l)
+qsub -cwd -l h=compute-0-9 -t 1-$POP_N /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/rarefied_counts.perpop_V_sites.lines.validated_subset.sh $DEPTH
+
+```
+
+#######Pb:
+########rarefied_counts.perpop_V_sites.Pb.sh
+```{R, engine='bash'}
+
+export PATH=$PATH:/share/apps/bedtools2/bin:/share/apps/est-sfs-release-2.03/:/share/apps/BAMTOOLS/bin:/share/apps/bedtools2/bin
+module load gcc/7.2.0
+module add gcc/7.2.0
+
+DEPTH=$1
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/
+POOL=$(ls *gen0-140_pool.validated_subset_all.txt | grep -Ev "sample|gen5" | head -n$SGE_TASK_ID | tail -n1)
+COLS=$(head -n1 all_samples_gen0-140_pool.validated_subset_all.depth_table.txt | cut -f10- | tr "\t" "\n" | grep -nv "^sample" | cut -d':' -f1 | awk '{for (i=1; i<=NF; i++) $i += 9} 1')
+FIELDS=$(echo $COLS | cut -d' ' -f1,5 | tr " " "-")
+
+ANN_CATEGORIES=$(head -n1 all_samples_gen0-140_pool.autosomes.validated_subset.depth_table.perpop_mindepth_${DEPTH}.txt | cut -f2- | tr "\t" "\n")
+for boot in {1..100}
+  do
+  N_BOOT=$(printf "%03d" ${boot})
+  #echo $N_BOOT
+  for category in ${ANN_CATEGORIES[@]}
+    do
+    #echo "${category}"
+    sort -k1,1 -k2,2n -u ${POOL/.txt/_mod.txt} | bedtools intersect -a stdin -b Pb.autosomes.validated_subset.perpop_V_sites.ann_cat_${category}.bed | awk -v depth=$DEPTH -F"\t" 'BEGIN {"date +%N" | getline seed; srand(seed);} {if($8 >= depth) {printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t", $1,$2,$3,$4,$5,$6,$7,$8); len=length($9); for(i=1;i<=depth;) {k=int(rand()*len)+1; if(!(k in N)) {N[k]; printf "%s", substr($9,k,1); i++;}} split("", N); print ""} else {print}}' | awk -v categ=$category -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $1,$2,$3,$4,$5,$6,$7,$8,$9,gsub($4, "", $9),gsub($5, "", $9),categ)}' > ./rarefied_counts/depth${DEPTH}/${POOL/.validated_subset_all.txt/.autosomes.validated_subset.perpop_V_sites.boot_${N_BOOT}.ann_cat_$category.txt}
+    done
+  cat ./rarefied_counts/depth${DEPTH}/${POOL/.validated_subset_all.txt/.autosomes.validated_subset.perpop_V_sites.boot_${N_BOOT}.ann_cat*.txt} | sort -k1,1 -k2,2n -u > ./rarefied_counts/depth${DEPTH}/${POOL/.validated_subset_all.txt/.autosomes.validated_subset.perpop_V_sites.boot_${N_BOOT}.txt}
+  #rm ./rarefied_counts/depth${DEPTH}/${POOL/.validated_subset_all.txt/.autosomes.validated_subset.perpop_V_sites.boot_${N_BOOT}.ann_cat*.txt}
+  done
+
+#Save this code as: /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/rarefied_counts.perpop_V_sites.Pb.validated_subset.sh
+
+```
+
+########Send the array-jobs:
+```{R, engine='bash'}
+
+#Run it as follows:
+DEPTH=50 #Input the desired target depth
+mkdir -p /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/depth${DEPTH} 
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/
+
+POOL_N=$(ls *gen0-140_pool.validated_subset_all.txt | grep -Ev "sample|gen5" | wc -l)
+qsub -cwd -l h=compute-0-9 -t 1-$POOL_N /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/rarefied_counts.perpop_V_sites.Pb.validated_subset.sh $DEPTH
+
+```
+
+######Obtain the average rarefied values:
+#######detailed_counts.perpop_V_sites.validated_subset.sh
+```{R, engine='bash'}
+
+DEPTH=$1
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/
+ORI_POOL=$(ls *gen0-140_pool.validated_subset_all.txt | grep -Ev 'gen5_|sample1_|sample10_|sample17_' | head -n$SGE_TASK_ID | tail -n1)
+POOL=$(echo ${ORI_POOL/.validated_subset_all.txt/.autosomes.validated_subset.perpop_V_sites})
+echo $POOL
+cd rarefied_counts/depth${DEPTH}/
+
+ANN_CATEGORIES=$(head -n1 /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/all_samples_gen0-140_pool.autosomes.validated_subset.depth_table.perpop_mindepth_${DEPTH}.txt | cut -f2- | tr "\t" "\n")
+rm ${POOL/.perpop_V_sites/.perpop_V_sites.detailed_counts.txt}
+for boot in {1..100}
+  do
+  N_BOOT=$(printf "%03d" ${boot})
+  #echo $N_BOOT
+  for category in ${ANN_CATEGORIES[@]}
+    do
+    #echo $category
+    awk -v boot=$N_BOOT -v categ=$category '$12==categ {sum+=$11;} END {printf ("%s\t%s\t%s\n", boot, categ, sum)}' ${POOL/.perpop_V_sites/.perpop_V_sites.boot_${N_BOOT}.txt} >> ${POOL/.perpop_V_sites/.perpop_V_sites.detailed_counts.txt}
+    done
+  done
+
+#Save this code as: /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/detailed_counts.perpop_V_sites.validated_subset.sh
+
+```
+
+#######Send the array-jobs:
+```{R, engine='bash'}
+
+#Run it as follows:
+DEPTH=50 #Input the desired target depth
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/
+
+POOL_N=$(ls *gen0-140_pool.validated_subset_all.txt | grep -Ev 'gen5_|sample1_|sample10_|sample17_' | wc -l)
+qsub -cwd -l h=compute-0-9 -t 1-$POOL_N /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/detailed_counts.perpop_V_sites.validated_subset.sh $DEPTH
+
+```
+
+######Retrieve derived counts per category:
+```{R, engine='bash'}
+
+REGION="autosomes" #all #autosomes #Xchr
+DEPTH=50
+N_BOOT=100
+
+cd /share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/depth$DEPTH/
+rm rarefied_depth_${DEPTH}_counts_pool_gen0-140_${REGION}_summary.validated_subset.perpop_V_sites.txt
+echo -e "sample\tgeneration\tnon-fourfold_V\tnon-fourfold_D\tfourfold_V\tfourfold_D\ttolerated_V\ttolerated_D\tdeleterious_V\tdeleterious_D\tLoF_V\tLoF_D" > rarefied_depth_${DEPTH}_counts_pool_gen0-140_${REGION}_summary.validated_subset.perpop_V_sites.txt
+POOL_LIST=($(ls *_gen0-140_pool.$REGION.validated_subset.perpop_V_sites.detailed_counts.txt))
+for pool in "${POOL_LIST[@]}"
+  do
+  echo "${pool}"
+  SAMPLE=$(echo "${pool}" | cut -d'_' -f1)
+  GEN=$(echo "${pool}" | cut -d'_' -f2)
+  NONFOURFOLD_V=0
+  NONFOURFOLD_D=$(awk -v categ="non-fourfold" -v boot=$N_BOOT '$2==categ {sum+=$3;} END {printf ("%.3f\n", sum/boot)}' $pool)
+  FOURFOLD_V=0
+  FOURFOLD_D=$(awk -v categ="fourfold" -v boot=$N_BOOT '$2==categ {sum+=$3;} END {printf ("%.3f\n", sum/boot)}' $pool)
+  MISTOL_V=0
+  MISTOL_D=$(awk -v categ="tolerated" -v boot=$N_BOOT '$2==categ {sum+=$3;} END {printf ("%.3f\n", sum/boot)}' $pool)
+  MISDEL_V=0
+  MISDEL_D=$(awk -v categ="deleterious" -v boot=$N_BOOT '$2==categ {sum+=$3;} END {printf ("%.3f\n", sum/boot)}' $pool)
+  LOF_V=0
+  LOF_D=$(awk -v categ="LoF" -v boot=$N_BOOT '$2==categ {sum+=$3;} END {printf ("%.3f\n", sum/boot)}' $pool)
+  echo -e "$SAMPLE\t$GEN\t$NONFOURFOLD_V\t$NONFOURFOLD_D\t$FOURFOLD_V\t$FOURFOLD_D\t$MISTOL_V\t$MISTOL_D\t$MISDEL_V\t$MISDEL_D\t$LOF_V\t$LOF_D" >> rarefied_depth_${DEPTH}_counts_pool_gen0-140_${REGION}_summary.validated_subset.perpop_V_sites.txt
+  done
+
+#From the local environment:
+REGION="autosomes" #all #autosomes #Xchr
+DEPTH=50
+scp ramon.pouso@rua2.uvigo.es://share/rdata/ramon.pouso/POOLS/all_gens_0_140/counts/rarefied_counts/depth${DEPTH}/rarefied_depth_${DEPTH}_counts_pool_gen0-140_${REGION}_summary.validated_subset.perpop_V_sites.txt /Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/all_sites/rarefied/depth${DEPTH}/
+
+```
+
+######Plot:
+```{r Plot variant count results}
+
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(scales)
+
+depth <- 50
+type <- "autosomes" #all #autosomes #Xchr
+
+wd_path <- paste0("/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/all_sites/rarefied/depth",depth,"/")
+pool_counts <- read_tsv(paste0(wd_path,"rarefied_depth_",depth,"_counts_pool_gen0-140_",type,"_summary.validated_subset.perpop_V_sites.txt")) %>% filter(generation!="gen5",sample!="sample1",sample!="sample10",sample!="sample17")
+
+codes_dictionary <- read_tsv(paste0(wd_path,"pop_codes_dictionary.txt"),col_names=c("old","population"))
+pool_counts <- left_join(pool_counts,codes_dictionary,by=c("sample"="old"))
+pool_counts$population = factor(pool_counts$population,levels=c("Pb","L01","L16","L27","L29","L31","L33","L34","L36","L38","L39","L42","L45","L48","L51","L52","L54","L59","L61","L63"))
+pool_counts$generation <- as.numeric(gsub("gen","",pool_counts$generation))
+pool_counts <- pool_counts %>% arrange(generation)
+pool_counts$generation = factor(pool_counts$generation)
+pool_counts <- pool_counts %>% arrange(population,generation)
+
+pool_counts_copies_absolute <- pool_counts %>% mutate(synonymous=(`non-fourfold_D` + fourfold_D),fourfold=fourfold_D,missense=(tolerated_D + deleterious_D),tolerated=tolerated_D,deleterious=deleterious_D,LoF=LoF_D) %>% select(!contains(c("_V","_D","sample"))) %>% gather(count,value,-generation,-population,factor_key=T) %>% mutate(group=ifelse(population=="Pb","Pb","lines"))
+pool_counts_copies_absolute$group = factor(pool_counts_copies_absolute$group,levels=c("Pb","lines"))
+pool_counts_copies_absolute
+
+#Obtain per population averages and standard errors:
+se <- function(x) sqrt(var(x)/length(x)) #first define the standard error function
+
+average_pool_counts_copies_absolute <- data_frame("population"=character(0),"generation"=character(0),"count"=character(0),"avg_value"=character(0),"se_value"=character(0)) #next, create the empty dataframe
+
+for (pop in unique(pool_counts_copies_absolute$group)) { #then loop over each population and feature to get the (relativised) mean and standard error, and feed the dataframe
+  print(pop)
+  for (g in unlist(unique(select(filter(pool_counts_copies_absolute,group==pop),generation)),use.names=F)) {
+  #species <- filter(relativised_pool_counts_copies_4FR,ratio==r & population==pop) %>% select(species) %>% unlist(.,use.names=F) %>% unique()
+    for (r in unique(pool_counts_copies_absolute$count)) {
+      print(r)
+      pop_mean <- filter(pool_counts_copies_absolute,count==r & generation==g & group==pop) %>% select(value) %>% unlist(.,use.names=F) %>% mean()
+      #print(paste0(pop," feature ",r," average is ",pop_mean))
+      pop_se <- filter(pool_counts_copies_absolute,count==r & generation==g & group==pop) %>% select(value) %>% unlist(.,use.names=F) %>% se()
+      #print(paste0(pop," feature ",r," std error is ",pop_se))
+      row_data <- cbind(pop,g,r,pop_mean,pop_se)
+      colnames(row_data) <- c("population","generation","count","avg_value","se_value")
+      average_pool_counts_copies_absolute <- rbind(average_pool_counts_copies_absolute,row_data,stringsAsFactors=F)
+    }
+  }
+}
+average_pool_counts_copies_absolute$population = factor(average_pool_counts_copies_absolute$population,levels=c("Pb","lines"))
+average_pool_counts_copies_absolute$count = factor(average_pool_counts_copies_absolute$count,levels=c("synonymous","fourfold","missense","tolerated","deleterious","LoF"))
+average_pool_counts_copies_absolute$generation <- as.factor(as.numeric(average_pool_counts_copies_absolute$generation))
+average_pool_counts_copies_absolute$avg_value <- as.numeric(average_pool_counts_copies_absolute$avg_value)
+average_pool_counts_copies_absolute$se_value <- as.numeric(average_pool_counts_copies_absolute$se_value)
+average_pool_counts_copies_absolute
+#write_tsv(average_relativised_pool_counts_copies_absolute,paste0(wd_path,"/pop_average_relativised_pool_counts_copies_absolute_",type,".txt"))
+
+#For depth 50:
+average_pool_counts_copies_absolute <- average_pool_counts_copies_absolute %>% mutate(y_min=ifelse(count=="synonymous",360000,ifelse(count=="fourfold",NA,ifelse(count=="missense",110000,ifelse(count=="tolerated",100000,ifelse(count=="deleterious",7500,480))))),y_max=ifelse(count=="synonymous",480000,ifelse(count=="fourfold",NA,ifelse(count=="missense",130500,ifelse(count=="tolerated",123500,ifelse(count=="deleterious",9400,680))))))
+
+#For depth 60:
+#average_pool_counts_copies_absolute <- average_pool_counts_copies_absolute %>% mutate(y_min=ifelse(count=="synonymous",45000,ifelse(count=="fourfold",NA,ifelse(count=="missense",19000,ifelse(count=="tolerated",17000,ifelse(count=="deleterious",1700,60))))),y_max=ifelse(count=="synonymous",60000,ifelse(count=="fourfold",NA,ifelse(count=="missense",20800,ifelse(count=="tolerated",18700,ifelse(count=="deleterious",2300,100))))))
+
+
+
+#Combined version:
+Pb_lines_pool_counts_copies_absolute_ggplot <- ggplot(data=filter(average_pool_counts_copies_absolute,count!="fourfold",generation!=5), aes(generation,avg_value)) +
+  #facet_wrap(feature ~ species,nrow=6,ncol=2,scales="free") +
+  facet_wrap(. ~ count, scales="free", nrow = 1) +
+  geom_errorbar(aes(ymin=avg_value-se_value, ymax=avg_value+se_value, colour=generation, group=population), position=position_dodge(0.8),size=0.5,width=0.5) +
+  geom_point(aes(colour=generation,shape=population),size=2,position=position_dodge(0.8)) +
+  geom_blank(aes(y = y_min)) +
+  geom_blank(aes(y = y_max)) +
+  #ggtitle("Proportion of reads at different NM") +
+  ylab("Derived count") +
+  #ylim(-0.1,1.1) +
+  #scale_y_continuous(breaks = seq(0.0, 1.0, by = 0.2), limits=c(0, 1.1)) +
+  scale_x_discrete(breaks = levels(average_pool_counts_copies_absolute$generation),limits = c(levels(average_pool_counts_copies_absolute$generation)[1],"skip",levels(average_pool_counts_copies_absolute$generation)[c(2:4)],c(rep("skip",3)),levels(average_pool_counts_copies_absolute$generation)[5])) +
+  scale_shape_manual(values=c(1,16)) +
+  ggtitle(paste0("Pools, rarefied data (cov. ",depth,")")) +
+  guides(colour="none") +
+  theme_bw() +
+  theme(text=element_text(size=12,face="bold"),
+        rect=element_rect(size=1),
+        axis.line=element_line(colour="black"),
+        axis.title=element_text(size=16),
+        axis.text=element_text(size=10,colour="black"),
+        axis.text.x=element_text(colour="black",size=10),
+        #axis.text.y=element_text(size=24,colour="black",margin=margin(t=0.5,unit="cm")),
+        #axis.title.y=element_text(size=30,margin=margin(r=0.5,unit="cm")),
+        panel.background=element_blank(),
+        panel.border=element_rect(colour="black"),
+        #panel.grid=element_blank(),
+        #panel.grid.major=element_line(colour="grey", linetype="dashed", size=0.4),
+        plot.margin=unit(c(0.5,0.5,0.5,0.5),"cm"),
+        #plot.title=element_text(size=36, face="bold", margin=margin(b=0.5, unit="cm")),
+        legend.background=element_rect(linetype="solid", colour="black", size=.5),
+        #legend.justification=c(0,0),
+        legend.key=element_rect(colour="white"),
+        #legend.key.size=unit(1.3,"cm"),
+        #legend.position="none",
+        legend.title=element_blank()
+  )
+Pb_lines_pool_counts_copies_absolute_ggplot
+ggsave(paste0("rarefied_depth_",depth,"_Pb_lines_pool_counts_copies_absolute_",type,".validated_subset.perpop_V_sites.pdf"), width=25, height=12, units="cm", device="pdf", path=wd_path)
+
+```
+
+###Check validated derived counts; cross validation at the individual VCFs level (different N SNPs per sample):
 ####Split the VCFs at the pool level:
 ```{R, engine='bash'}
 
@@ -16635,7 +17379,8 @@ ggsave(paste0("Pb_lines_relativised_pool_counts_copies_4FR_",type,".validated_sn
 ```
 
 ####Rarefied:
-#####Retrieve derived counts per category:
+#####Original rarefaction:
+######Retrieve derived counts per category:
 ```{R, engine='bash'}
 
 REGION="all" #all #autosomes #Xchr
@@ -16690,7 +17435,7 @@ scp ramon.pouso@rua2.uvigo.es://share/rdata/ramon.pouso/POOLS/all_gens_0_140/cou
 
 ```
 
-#####Plot relativised counts (not the manuscript version):
+######Plot relativised counts (not the manuscript version):
 ```{r Plot variant count results}
 
 library(readr)
@@ -16802,6 +17547,9 @@ Pb_lines_relativised_pool_counts_copies_4FR_ggplot
 ggsave(paste0("rarefied_depth_",depth,"_Pb_lines_relativised_pool_counts_copies_4FR_",type,".validated_snps.pdf"), width=15, height=12, units="cm", device="pdf", path=wd_path)
 
 ```
+
+
+
 ###Bootstrap:
 ####Obtain statistics for each block in parallel runs.
 #####Derived allele counts.
@@ -20191,7 +20939,7 @@ export SSHPASS=$(cat /Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/dro
 sshpass -e scp ramon.pouso@rua2.uvigo.es://share/rdata2/dani_k/consanguinidad_lenta/simulations/results/infNatPop/*L_lethal0.0.*Purging/TP2600.AL80.s0.05.s0.5/derived_count*Purging.dat /Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/simulations/excl_newmut_gen83/infiniteNatPop/
 
 #Convert from .dat to .txt, from outside the server:
-cd /Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/simulations/excl_newmut_gen83/infiniteNatPop/
+cd /Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/simulations/excl_newmut_gen83/infiniteNatPop/ #even though it was stored here, new mutation for fourfold_syn is indeed included.
 FILES=$(ls derived_count_*L_lethal0.0.*Purging.dat) #find . -mtime -1
 for file in ${FILES[@]}
   do 
@@ -20520,9 +21268,9 @@ library(egg)
 
 
 ##4h x 3s:
-ggplot_combined <- grid.arrange(set_panel_size(plots_variables[[1]],width=unit(4,"cm"),height=unit(4,"cm")),set_panel_size(plots_variables[[2]],width=unit(4,"cm"),height=unit(4,"cm")),set_panel_size(plots_variables[[4]],width=unit(4,"cm"),height=unit(4,"cm")),set_panel_size(plots_variables[[3]],width=unit(4,"cm"),height=unit(4,"cm")),set_panel_size(plots_variables[[5]],width=unit(4,"cm"),height=unit(4,"cm")),set_panel_size(plots_variables[[6]],width=unit(4,"cm"),height=unit(4,"cm")),set_panel_size(plots_variables[[8]],width=unit(4,"cm"),height=unit(4,"cm")),set_panel_size(plots_variables[[7]],width=unit(4,"cm"),height=unit(4,"cm")),set_panel_size(plots_variables[[9]],width=unit(4,"cm"),height=unit(4,"cm")),set_panel_size(plots_variables[[10]],width=unit(4,"cm"),height=unit(4,"cm")),set_panel_size(plots_variables[[12]],width=unit(4,"cm"),height=unit(4,"cm")),set_panel_size(plots_variables[[11]],width=unit(4,"cm"),height=unit(4,"cm")),ncol=4,bottom=textGrob(expression(bold("Generations")),gp=gpar(fontsize=11,fontface="bold"),x=0.47,hjust=0),left=textGrob(expression(bold("Derived count relative to Pb-083 and 4-fold syn.")),rot=90,gp=gpar(fontsize=11,fontface="bold"),vjust=0.4),right=textGrob(expression(bold("s = 0.01                                        s = 0.1                                         s = 0.2")),rot=-90,gp=gpar(fontsize=11,fontface="bold"),x=-0.75,vjust=-1,hjust=0.51),top=textGrob(expression(bold("h = 0.05                                                                      h = 0.283                                                                       h = 0.5                                                                 h = 0.5 (constant)")),gp=gpar(fontsize=11,fontface="bold"),x=0.11,hjust=0,vjust=1))
+ggplot_combined <- grid.arrange(set_panel_size(plots_variables[[1]],width=unit(4,"cm"),height=unit(4,"cm")),set_panel_size(plots_variables[[2]],width=unit(4,"cm"),height=unit(4,"cm")),set_panel_size(plots_variables[[4]],width=unit(4,"cm"),height=unit(4,"cm")),set_panel_size(plots_variables[[3]],width=unit(4,"cm"),height=unit(4,"cm")),set_panel_size(plots_variables[[5]],width=unit(4,"cm"),height=unit(4,"cm")),set_panel_size(plots_variables[[6]],width=unit(4,"cm"),height=unit(4,"cm")),set_panel_size(plots_variables[[8]],width=unit(4,"cm"),height=unit(4,"cm")),set_panel_size(plots_variables[[7]],width=unit(4,"cm"),height=unit(4,"cm")),set_panel_size(plots_variables[[9]],width=unit(4,"cm"),height=unit(4,"cm")),set_panel_size(plots_variables[[10]],width=unit(4,"cm"),height=unit(4,"cm")),set_panel_size(plots_variables[[12]],width=unit(4,"cm"),height=unit(4,"cm")),set_panel_size(plots_variables[[11]],width=unit(4,"cm"),height=unit(4,"cm")),ncol=4,bottom=textGrob(expression(bold("Generations")),gp=gpar(fontsize=11,fontface="bold"),x=0.47,hjust=0),left=textGrob(expression(bold("Derived count relative to Pb-083 and 4-fold syn.")),rot=90,gp=gpar(fontsize=11,fontface="bold"),vjust=0.4),right=textGrob(expression(bold(paste(bar("s")," = 0.01                                        ",bar("s")," = 0.1                                         ",bar("s")," = 0.2"))),rot=-90,gp=gpar(fontsize=11,fontface="bold"),x=-0.75,vjust=-1,hjust=0.51),top=textGrob(expression(bold(paste(bar("h")," = 0.05                                                                      ",bar("h")," = 0.283                                                                       ",bar("h")," = 0.5                                                                 h = 0.5 (constant)"))),gp=gpar(fontsize=11,fontface="bold"),x=0.11,hjust=0,vjust=1))
 
-ggsave("20240904_h_vs_s_test_simulations_wout_lethals.ratio_of_averages.syn_wout.pdf", width=38, height=18, units="cm", device="pdf", path="/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/simulations/excl_newmut_gen83/infiniteNatPop/",ggplot_combined)
+ggsave("20260302_h_vs_s_test_simulations_wout_lethals.ratio_of_averages.pdf", width=38, height=18, units="cm", device="pdf", path="/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/simulations/excl_newmut_gen83/infiniteNatPop/",ggplot_combined)
 
 #Stop
 STOP
@@ -20648,11 +21396,14 @@ if (parameters=="L0.04.L_lethal0.015.K1000.beta0.33.s0.2.h0.283.Neutral") {
 }
 }
 
+#Edit the facet labels for the neutral model:
+new_category_names <- c("previously m. deleterious","previously LoF")
+names(new_category_names) <- c("m. deleterious","LoF")
 
 #Plot the data (all models combined):
 Pb_lines_relativised_pool_counts_copies_errors_4FR_ggplot_neutral_withnewmut <- ggplot(data=filter(average_combined_tidy_neutral_withnewmut,ratio!="fourfold",ratio!="m. tolerated"), aes(generation,mean)) +
   #facet_wrap(feature ~ species,nrow=6,ncol=2,scales="free") +
-  facet_grid(. ~ ratio) +
+  facet_grid(. ~ ratio, labeller = labeller(ratio = new_category_names)) +
   geom_errorbar(aes(ymin=mean-error, ymax=mean+error, group=population), position=position_dodge(10),linewidth=0.5,width=0.5) +
   geom_point(aes(colour=population,shape=population),size=3,position=position_dodge(10)) + 
   #ggtitle("Proportion of reads at different NM") +
@@ -20784,9 +21535,16 @@ library(grid)
 library(gridExtra)
 library(egg)
 
+#Version without editing names for the neutral model:
 ggplot_combined <- grid.arrange(set_panel_size(Pb_lines_relativised_pool_counts_copies_errors_4FR_ggplot_neutral_withnewmut,width=unit(6,"cm"),height=unit(6,"cm")),set_panel_size(Pb_lines_relativised_pool_counts_copies_errors_4FR_ggplot_additive_withnewmut,width=unit(6,"cm"),height=unit(6,"cm")),set_panel_size(Pb_lines_relativised_pool_counts_copies_errors_4FR_ggplot_purging_withnewmut,width=unit(6,"cm"),height=unit(6,"cm")),ncol=1,bottom=textGrob(expression(bold("Generations")),gp=gpar(fontsize=11,fontface="bold"),x=0.38,hjust=0),left=textGrob(expression(bold("Derived count relative to Pb-083 and 4-fold syn.")), rot=90,gp=gpar(fontsize=11,fontface="bold"),vjust=2),right=textGrob(expression(bold("Neutral model                                         Additive model                                      Purging model")),rot=-90,gp=gpar(fontsize=11,fontface="bold"),x=-5,vjust=0,hjust=0.51))
 
 ggsave("20240613_main_simulations.ratio_of_averages.syn_wout.doubleU.pdf", width=18, height=22.5, units="cm", device="pdf", path="/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/simulations/excl_newmut_gen83/infiniteNatPop/",ggplot_combined)
+
+#Version editing names for the neutral model:
+ggplot_combined <- grid.arrange(set_panel_size(Pb_lines_relativised_pool_counts_copies_errors_4FR_ggplot_neutral_withnewmut,width=unit(6,"cm"),height=unit(6,"cm")),set_panel_size(Pb_lines_relativised_pool_counts_copies_errors_4FR_ggplot_additive_withnewmut,width=unit(6,"cm"),height=unit(6,"cm")),set_panel_size(Pb_lines_relativised_pool_counts_copies_errors_4FR_ggplot_purging_withnewmut,width=unit(6,"cm"),height=unit(6,"cm")),ncol=1,bottom=textGrob(expression(bold("Generations")),gp=gpar(fontsize=11,fontface="bold"),x=0.38,hjust=0),left=textGrob(expression(bold("Derived count relative to Pb-083 and 4-fold syn.")), rot=90,gp=gpar(fontsize=11,fontface="bold"),vjust=2),right=textGrob(expression(bold("Post-founding neutral model                          Additive model                                      Purging model")),rot=-90,gp=gpar(fontsize=11,fontface="bold"),x=-5,vjust=0,hjust=0.56))
+
+ggsave("20260302_main_simulations.ratio_of_averages.syn_wout.doubleU.pdf", width=18, height=22.5, units="cm", device="pdf", path="/Users/dani/Documents/dani/Post-docs/2022_contrato_Vigo/drosophila_load/Analisis_dani/counts/simulations/excl_newmut_gen83/infiniteNatPop/",ggplot_combined)
+
 
 #Stop
 STOP
