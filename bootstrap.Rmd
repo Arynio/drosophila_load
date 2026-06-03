@@ -602,7 +602,7 @@ cat pool_headers.txt <(paste <(tail -n+2 /share/rdata/ramon.pouso/counts/sites_i
 cat pool_headers.txt <(paste <(tail -n+2 counts_pool_gen0-140_whole-genome_average.bootcorrectionfactor.txt) <(tail -n+2 counts_pool_gen0-140_whole-genome_average.booterror.txt) | awk '{h=NF/2;for (i=3;i<=h;i++) $i=$i*$(i+h);NF=h};1' | tr " " "\t") > counts_pool_gen0-140_whole-genome_average.booterrorcorrected.txt
 
 
-#Per population adequate error: Eglobal(M) = [EB^2(M) + ET^2(M)]^0.5 where EB is the per population mean of the (corrected) bootstrap error, and ET is the per population empirical standard error (sampling error).
+#Per population total error: Eglobal(M) = [EB^2(M) + ET^2(M)]^0.5 where EB is the per population mean of the (corrected) bootstrap error, and ET is the per population empirical standard error (sampling error).
 cat pool_headers.txt <(paste pop_gen.txt <(awk '{for (i=3;i<=NF;i++) {total[FNR","i]+=$i; sumsq[FNR","i]+=$i*$i; }} END {for (j=1;j<=FNR;j++) {for (i=3;i<NF;i++) printf "%.8f\t",(sumsq[j","i])**0.5; printf "%.8f\n",(sumsq[j","NF])**0.5;}}' <(tail -n+2 counts_pool_gen0-140_whole-genome_average.booterrorcorrected.txt) <(tail -n+2 /share/rdata/ramon.pouso/counts/sites_in_0-140_VCF/pools_counts/gen0-140/key_categories/counts_pool_gen0-140_whole-genome_average.empirerror.txt))) > counts_pool_gen0-140_whole-genome_average.totalerror.txt
 
 #Per population mixed error: booterrorcorrected for the PB (actually, it would be the total error, but the empirical here is 0 since only one population is considered), and empirerror for the lines (because repetition already accounts for the evolutionary error, thus the bootrstrap is redundant).
