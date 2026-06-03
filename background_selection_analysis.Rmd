@@ -186,6 +186,8 @@ for f in ${FILES[@]}; do mv $f ${f/_filtered/_autosomes}; done
 ####Lines from the slow inbreeding experiment:
 ```{bash}
 
+#If genetic distances are to be added to the map files without losing sites (those not present in Pb-B-ALL, which is where genetic distances have been calculated), perhaps another option would be to calculate the average between the preceeding and the following SNP.
+
 module load bcftools/1.9
 module load gcc/7.2.0
 module add gcc/7.2.0
@@ -198,9 +200,9 @@ for pop in ${LINES[@]}
   cd /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/linea_"${pop}"/dani/
   #Filter the files:
   /share/rdata2/dani_k/seleccion_fondo/plink/plink --file L"${pop}"-Allcomb_autohap_genotyped_snps_masked_hf_pass --exclude range /share/rdata2/dani_k/seleccion_fondo/TFM/exclude_phastCons_UTR_missense_LoF.txt --make-bed --recode --out L"${pop}"-Allcomb_autohap_genotyped_snps_masked_hf_pass_filtered
-  #Add proper genetic distances:
-  bedtools intersect -a <(awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\n", $1,$4-1,$4,$2,$3)}' L"${pop}"-Allcomb_autohap_genotyped_snps_masked_hf_pass_filtered.map) -b <(awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\n", $1,$4-1,$4,$2,$3/2)}' /share/rdata2/dani_k/seleccion_fondo/plink/genetic_map/Pb-B-ALL_merged_snps_final_autosomic.map) -wa -wb | awk -F"\t" '{printf ("%s\t%s\t%s\t%s\n", $1,$4,$10,$3)}' > L"${pop}"-Allcomb_autohap_genotyped_snps_masked_hf_pass_filtered.map.bis
-  mv L"${pop}"-Allcomb_autohap_genotyped_snps_masked_hf_pass_filtered.map.bis L"${pop}"-Allcomb_autohap_genotyped_snps_masked_hf_pass_filtered.map
+  #Add proper genetic distances (this doesn't work fine because some sites not present in Pb-B_ALL are lost from the map, but not from the ped):
+  #bedtools intersect -a <(awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\n", $1,$4-1,$4,$2,$3)}' L"${pop}"-Allcomb_autohap_genotyped_snps_masked_hf_pass_filtered.map) -b <(awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\n", $1,$4-1,$4,$2,$3/2)}' /share/rdata2/dani_k/seleccion_fondo/plink/genetic_map/Pb-B-ALL_merged_snps_final_autosomic.map) -wa -wb | awk -F"\t" '{printf ("%s\t%s\t%s\t%s\n", $1,$4,$10,$3)}' > L"${pop}"-Allcomb_autohap_genotyped_snps_masked_hf_pass_filtered.map.bis
+  #mv L"${pop}"-Allcomb_autohap_genotyped_snps_masked_hf_pass_filtered.map.bis L"${pop}"-Allcomb_autohap_genotyped_snps_masked_hf_pass_filtered.map
   done
 ##For the Xchr:
 LINES=$(bcftools query -l /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/Alllinesonly-Allcomb_autohap_genotyped_snps_masked_hf_pass.vcf | cut -c 2-3 | sort -u)
@@ -210,9 +212,9 @@ for pop in ${LINES[@]}
   cd /share/rdata/ramon.pouso/INDIVIDUOS/gen40/gen40/6variants/linea_"${pop}"/dani/
   #Filter the files:
   /share/rdata2/dani_k/seleccion_fondo/plink/plink --file L"${pop}"-Allcomb_xhap_genotyped_snps_masked_hf_pass.corrected --exclude range /share/rdata2/dani_k/seleccion_fondo/TFM/exclude_phastCons_UTR_missense_LoF.txt --make-bed --recode --out L"${pop}"-Allcomb_xhap_genotyped_snps_masked_hf_pass_filtered
-  #Add proper genetic distances:
-  bedtools intersect -a <(awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\n", $1,$4-1,$4,$2,$3)}' L"${pop}"-Allcomb_xhap_genotyped_snps_masked_hf_pass_filtered.map) -b <(awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\n", $1,$4-1,$4,$2,$3*2/3)}' /share/rdata2/dani_k/seleccion_fondo/plink/genetic_map/Pb-B-ALL_merged_snps_final_X.map) -wa -wb | awk -F"\t" '{printf ("%s\t%s\t%s\t%s\n", $1,$4,$10,$3)}' > L"${pop}"-Allcomb_xhap_genotyped_snps_masked_hf_pass_filtered.map.bis
-  mv L"${pop}"-Allcomb_xhap_genotyped_snps_masked_hf_pass_filtered.map.bis L"${pop}"-Allcomb_xhap_genotyped_snps_masked_hf_pass_filtered.map
+  #Add proper genetic distances (this doesn't work fine because some sites not present in Pb-B_ALL are lost from the map, but not from the ped):
+  #bedtools intersect -a <(awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\n", $1,$4-1,$4,$2,$3)}' L"${pop}"-Allcomb_xhap_genotyped_snps_masked_hf_pass_filtered.map) -b <(awk -F"\t" '{printf ("%s\t%s\t%s\t%s\t%s\n", $1,$4-1,$4,$2,$3*2/3)}' /share/rdata2/dani_k/seleccion_fondo/plink/genetic_map/Pb-B-ALL_merged_snps_final_X.map) -wa -wb | awk -F"\t" '{printf ("%s\t%s\t%s\t%s\n", $1,$4,$10,$3)}' > L"${pop}"-Allcomb_xhap_genotyped_snps_masked_hf_pass_filtered.map.bis
+  #mv L"${pop}"-Allcomb_xhap_genotyped_snps_masked_hf_pass_filtered.map.bis L"${pop}"-Allcomb_xhap_genotyped_snps_masked_hf_pass_filtered.map
   done
 
 #Copy the files to the destination folder using invitado1:
